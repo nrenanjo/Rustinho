@@ -267,6 +267,7 @@ const GRAVAM_TAMBEM: &[&str] = &[
     "fiscal_regra_excluir",
     "fiscal_regra_salvar",
     "gerente_salvar",
+    "nota_descartar",
     "menu_fixar",
     "menu_usar",
     "pagar_alterar",

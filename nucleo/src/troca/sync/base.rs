@@ -81,6 +81,9 @@ pub const PENDENCIAS_MAXIMAS: i64 = 1000;
 /// Prefixo da configuração que diz que um caixa foi retirado da loja (vai
 /// para todos os caixas; um caixa antigo ignora).
 pub const PREFIXO_RETIRADO: &str = "caixa_retirado:";
+/// C-M4 da R1 (0.9.19, etapa 3): o computador que emite numa série fiscal ("fiscal_estacao:<modelo>:<série>"). Vai
+/// para todos os caixas: dois computadores na mesma série dariam o mesmo número de nota.
+pub const PREFIXO_ESTACAO_FISCAL: &str = "fiscal_estacao:";
 
 /// Quantas versões anteriores cada alteração leva na história. É só um
 /// atalho: a relação certa entre versões vem da cadeia de bases no log (as

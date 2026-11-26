@@ -40,6 +40,9 @@ pub struct Tributacao {
     pub automatico: bool,
     /// Some(true) com ST, Some(false) sem ST, None sem regra para o CEST.
     pub com_st: Option<bool>,
+    /// C-M7 da R1: false = sem regra (sem UF, sem CEST ou sem regra para o CEST nesta data) e sem CSOSN escolhido à
+    /// mão: o Rustinho não decide; o CSOSN e o CFOP ficam vazios ("a definir").
+    pub decidido: bool,
     /// Frase curta para mostrar na ficha.
     pub explicacao: String,
     /// Aviso quando o CSOSN escolhido à mão não combina com a regra.
@@ -87,24 +90,39 @@ pub fn situacao_st(conn: &Connection, uf: &str, cest: &str, data: &str) -> Resul
 pub fn tributacao(conn: &Connection, uf: &str, cest: &str, csosn_peca: &str, data: &str) -> Resultado<Tributacao> {
     let regra = situacao_st(conn, uf, cest, data)?;
     let com_st = regra.as_ref().map(|r| r.0);
+    // C-M7 da R1: sem regra, o Rustinho não presume (nem "sem ST"): o CSOSN fica a definir com o contador.
     let (csosn_auto, explicacao) = match &regra {
         Some((true, d)) => ("500", d.clone()),
         Some((false, d)) => ("102", d.clone()),
-        None if uf.is_empty() => ("102", "Informe o estado da loja em Configurações para conferir a ST.".to_string()),
-        None if documento::digitos(cest).is_empty() => ("102", "Sem CEST: tratada como peça sem ST.".to_string()),
-        None => ("102", format!("Nenhuma regra de ST para este CEST em {uf}.")),
+        None if uf.is_empty() => {
+            ("", "Informe o estado da loja em Configurações: sem ele, o Rustinho não sabe se a peça tem ST.".to_string())
+        }
+        None if documento::digitos(cest).is_empty() => {
+            ("", "Sem CEST: o Rustinho não sabe se a peça tem ST. Confira o NCM e o CEST com o contador.".to_string())
+        }
+        None => (
+            "",
+            format!("Nenhuma regra de ST para este CEST em {uf} nesta data: o Rustinho não decide. Confirme com o contador."),
+        ),
     };
     let automatico = csosn_peca.is_empty();
     let csosn = if automatico { csosn_auto.to_string() } else { csosn_peca.to_string() };
+    let decidido = !csosn.is_empty();
     // 500: a ST já foi paga antes, a loja é a substituída (CFOP 5.405). 201, 202 e 203: a loja cobra a ST, é a
     // substituta (CFOP 5.403). Tabela de CFOP do CONFAZ; CSOSN do MOC 7.0, Anexo I.
     let cfop = match csosn.as_str() {
+        "" => "",
         "500" => "5405",
         "201" | "202" | "203" => "5403",
         _ => "5102",
     }
     .to_string();
     let alerta = match (csosn.as_str(), com_st) {
+        // F2-4 da R1 (MOC 7.0, Anexo I: N12a-20, rejeição 383; N12a-40 e N12a-44; N12a-70): o substituto só existe na
+        // NF-e para contribuinte; na NFC-e e na NF-e para consumidor a SEFAZ recusa.
+        ("201" | "202" | "203", _) => format!(
+            "CSOSN {csosn} (a loja cobra a ST) só vale na NF-e para empresa contribuinte. Na NFC-e do balcão e na NF-e para consumidor a SEFAZ recusa (rejeição 383). Confirme com o contador."
+        ),
         ("500", Some(false)) => format!(
             "Esta peça está com CSOSN 500, mas pela regra de {uf} ela não tem mais ST nesta data. O certo deve ser 102 (CFOP 5102). Confirme com o contador."
         ),
@@ -113,7 +131,46 @@ pub fn tributacao(conn: &Connection, uf: &str, cest: &str, csosn_peca: &str, dat
         ),
         _ => String::new(),
     };
-    Ok(Tributacao { csosn, cfop, automatico, com_st, explicacao, alerta })
+    Ok(Tributacao { csosn, cfop, automatico, com_st, decidido, explicacao, alerta })
+}
+
+/// G5 da R1: o último dia do PIS/COFINS monofásico das autopeças e dos pneus (Lei 10.485/2002). A LC 214/2025, art.
+/// 542, XVI, revoga os arts. 1º a 3º, 5º e 6º da Lei 10.485 a partir de 01/01/2027 (lida no Planalto; artefato 02b).
+pub const FIM_DO_MONOFASICO: &str = "2026-12-31";
+
+/// O PIS/COFINS monofásico ainda vale nessa data ("AAAA-MM-DD")?
+pub fn monofasico_vale(data: &str) -> bool {
+    data <= FIM_DO_MONOFASICO
+}
+
+/// G6 da R1 (Ajuste SINIEF 23/26, cl. primeira, efeitos a partir de 05/10/2026): na venda do varejista que permite ao
+/// comprador aproveitar o crédito do ICMS, a NF-e (55) é obrigatória no lugar da NFC-e (65); o DANFE pode ser o
+/// Simplificado Tipo 2 (§ 1º), e a legislação da UF pode fixar limites e condições (§ 3º). `data`: "AAAA-MM-DD".
+pub fn modelo_da_venda(comprador_aproveita_credito: bool, data: &str) -> i64 {
+    if comprador_aproveita_credito && data >= "2026-10-05" {
+        55
+    } else {
+        65
+    }
+}
+
+/// G8 da R1: o CFOP da devolução pela operação de origem (tabela de CFOP do CONFAZ, vigente, lida em 26/11/2026:
+/// "cujas saídas tenham sido classificadas como…" / "cujas entradas tenham sido classificadas como…"). `None`: a
+/// operação de origem não está no mapa (a definir com o contador; o Rustinho não presume).
+pub fn cfop_da_devolucao(cfop_original: &str) -> Option<&'static str> {
+    Some(match documento::digitos(cfop_original).as_str() {
+        // devolução de venda (entrada na loja)
+        "5102" => "1202",
+        "6102" => "2202",
+        "5403" | "5405" => "1411",
+        "6403" | "6404" => "2411",
+        // devolução de compra (saída para o fornecedor)
+        "1102" => "5202",
+        "2102" => "6202",
+        "1403" => "5411",
+        "2403" => "6411",
+        _ => return None,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -146,7 +203,13 @@ pub struct Conferencia {
     pub sem_ncm: Vec<PecaFiscal>,
     /// Peças sem CEST cuja NCM está na lista oficial de autopeças ou pneus (Conv. 142/18): "a analisar".
     pub sem_cest: Vec<PecaFiscal>,
+    /// C-M7 da R1: peças sem CSOSN escolhido à mão e sem regra que decida (o CSOSN fica a definir com o contador).
+    pub a_definir: Vec<PecaFiscal>,
+    /// C-M6 da R1: as regras do programa que não entraram (a loja tem regra própria no mesmo período).
+    pub regras_puladas: Vec<String>,
     pub monofasicas: i64,
+    /// G5 da R1: o monofásico ainda vale na data da conferência (até 31/12/2026).
+    pub monofasico_vale: bool,
     pub total_pecas: i64,
     pub regras: Vec<RegraSt>,
 }
@@ -164,6 +227,7 @@ pub fn conferir(conn: &Connection, data: &str) -> Resultado<Conferencia> {
     let mut conflitos = Vec::new();
     let mut sem_ncm = Vec::new();
     let mut sem_cest = Vec::new();
+    let mut a_definir = Vec::new();
     for (id, codigo, nome, marca, ncm, cest, csosn) in &pecas {
         let t = tributacao(conn, &uf, cest, csosn, data)?;
         let item = |motivo: String| PecaFiscal {
@@ -173,7 +237,13 @@ pub fn conferir(conn: &Connection, data: &str) -> Resultado<Conferencia> {
             marca: marca.clone(),
             ncm: ncm.clone(),
             cest: cest.clone(),
-            csosn: if csosn.is_empty() { format!("{} (automático)", t.csosn) } else { csosn.clone() },
+            csosn: if !csosn.is_empty() {
+                csosn.clone()
+            } else if t.decidido {
+                format!("{} (automático)", t.csosn)
+            } else {
+                "a definir".to_string()
+            },
             sugerido: match t.com_st {
                 Some(true) => "500".into(),
                 Some(false) => "102".into(),
@@ -184,6 +254,9 @@ pub fn conferir(conn: &Connection, data: &str) -> Resultado<Conferencia> {
         };
         if !t.alerta.is_empty() {
             conflitos.push(item(t.explicacao.clone()));
+        }
+        if !t.decidido {
+            a_definir.push(item(t.explicacao.clone()));
         }
         if ncm.is_empty() {
             sem_ncm.push(item("Sem NCM".into()));
@@ -205,7 +278,15 @@ pub fn conferir(conn: &Connection, data: &str) -> Resultado<Conferencia> {
         conflitos,
         sem_ncm,
         sem_cest,
+        a_definir,
+        regras_puladas: config::ler(conn, CHAVE_PULADAS)?
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(str::to_string)
+            .collect(),
         monofasicas,
+        monofasico_vale: monofasico_vale(data),
         total_pecas: pecas.len() as i64,
         regras: regras(conn)?,
     })
@@ -238,7 +319,7 @@ fn lista_cest() -> &'static [(String, String)] {
                 let cest = i.cest;
                 i.ncm
                     .split_whitespace()
-                    .map(|n| documento::digitos(n))
+                    .map(documento::digitos)
                     .filter(|n| !n.is_empty())
                     .map(move |n| (n, cest.clone()))
                     .collect::<Vec<_>>()
@@ -320,6 +401,9 @@ pub struct RegraSt {
     /// A regra já valeu (começou hoje ou antes): não se exclui, e o estado, o
     /// CEST, o início e o "com ST" não mudam. Só leitura.
     pub ja_valeu: bool,
+    /// F2-3 (b) da R1: o início é a data legal (true) ou só a data em que a regra foi conferida valendo, porque a fonte
+    /// lida não informa o início (false). Só leitura (a regra da loja tem o início que o gerente digitou: true).
+    pub inicio_informado: bool,
 }
 
 fn situacao(de: &str, ate: Option<&str>, hoje: &str) -> &'static str {
@@ -341,7 +425,7 @@ pub fn regras(conn: &Connection) -> Resultado<Vec<RegraSt>> {
     let hoje = hoje(conn)?;
     let mut c = conn.prepare(
         "SELECT id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, fonte, dispositivo, consultada_em,
-                origem
+                origem, inicio_informado
            FROM regra_st ORDER BY uf, cest_inicio, vigente_de",
     )?;
     let linhas = c.query_map([], |l| {
@@ -362,6 +446,7 @@ pub fn regras(conn: &Connection) -> Resultado<Vec<RegraSt>> {
             origem: l.get(10)?,
             situacao: situacao(&de, ate.as_deref(), &hoje).to_string(),
             ja_valeu: de <= hoje,
+            inicio_informado: l.get(11)?,
         })
     })?;
     Ok(linhas.collect::<Result<_, _>>()?)
@@ -455,6 +540,13 @@ pub fn salvar_regra(conn: &Connection, dispositivo: &str, usuario_id: &str, r: &
                 return Err(Erro::campo(
                     "vigenteAte",
                     format!("A regra já valeu: a data final não pode ficar antes de ontem ({}).", data_br(&limite)),
+                ));
+            }
+            // B3 da R1: a que já terminou não volta a valer (estender o fim reabriria dias que já passaram).
+            if ate_nova > ate_antes && ate_antes < limite {
+                return Err(Erro::campo(
+                    "vigenteAte",
+                    "Esta regra já terminou e não volta a valer. Para valer de novo, crie outra regra a partir de hoje.",
                 ));
             }
         }
@@ -600,7 +692,18 @@ struct RegraDoPrograma {
     dispositivo: String,
     consultada_em: String,
     desde_versao: i64,
+    /// F2-3 (b): a fonte informa o início (o `vigente_de` é a data legal).
+    #[serde(default)]
+    inicio_informado: bool,
+    /// C-M6 da R1: a versão do catálogo em que o conteúdo da linha foi definido pela última vez (0 = a `desde_versao`).
+    /// Maior que a versão aplicada aqui: a linha do programa que a loja não mudou é corrigida.
+    #[serde(default)]
+    versao_da_linha: i64,
 }
+
+/// As regras do programa que não entraram porque a loja já tem regra do mesmo estado e CEST no mesmo período (só
+/// deste computador; a conferência mostra o aviso). Texto: uma linha por regra.
+pub const CHAVE_PULADAS: &str = "regras_st_catalogo_puladas";
 
 /// A versão do catálogo já aplicada neste computador (chave só deste
 /// computador: cada caixa aplica o seu ao abrir).
@@ -622,28 +725,80 @@ pub fn carregar_regras_do_programa(tx: &Connection) -> Resultado<usize> {
         return Ok(0);
     }
     let mut entraram = 0;
-    for r in catalogo.regras.iter().filter(|r| r.desde_versao > aplicada) {
-        if sobreposta(tx, &r.id, &r.uf, &r.cest_inicio, &r.vigente_de, r.vigente_ate.as_deref())? {
-            continue;
+    let mut corrigidas = Vec::new();
+    let mut puladas: Vec<String> = config::ler(tx, CHAVE_PULADAS)?
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(str::to_string)
+        .collect();
+    for r in &catalogo.regras {
+        let versao_da_linha = r.versao_da_linha.max(r.desde_versao);
+        if r.desde_versao > aplicada {
+            if sobreposta(tx, &r.id, &r.uf, &r.cest_inicio, &r.vigente_de, r.vigente_ate.as_deref())? {
+                // C-M6 da R1: a pulada não some em silêncio.
+                let aviso = format!(
+                    "{} CEST {} ({}): a loja já tem regra própria no mesmo período",
+                    r.uf, r.cest_inicio, r.descricao
+                );
+                if !puladas.contains(&aviso) {
+                    puladas.push(aviso);
+                }
+                continue;
+            }
+            entraram += tx.execute(
+                "INSERT OR IGNORE INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, fonte,
+                                                 dispositivo, consultada_em, origem, inicio_informado)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'rustinho', ?11)",
+                params![
+                    r.id,
+                    r.uf,
+                    r.cest_inicio,
+                    r.vigente_de,
+                    r.vigente_ate,
+                    r.com_st,
+                    r.descricao,
+                    r.fonte,
+                    r.dispositivo,
+                    r.consultada_em,
+                    r.inicio_informado
+                ],
+            )?;
+        } else if versao_da_linha > aplicada {
+            // C-M6 da R1: a correção do programa vale para a linha que a loja não mudou (origem "rustinho").
+            let n = tx.execute(
+                "UPDATE regra_st SET uf = ?2, cest_inicio = ?3, vigente_de = ?4, vigente_ate = ?5, com_st = ?6,
+                                     descricao = ?7, fonte = ?8, dispositivo = ?9, consultada_em = ?10,
+                                     inicio_informado = ?11
+                  WHERE id = ?1 AND origem = 'rustinho'
+                    AND (uf, cest_inicio, vigente_de, COALESCE(vigente_ate, ''), com_st, descricao, fonte, dispositivo,
+                         consultada_em, inicio_informado)
+                        IS NOT (?2, ?3, ?4, COALESCE(?5, ''), ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    r.id,
+                    r.uf,
+                    r.cest_inicio,
+                    r.vigente_de,
+                    r.vigente_ate,
+                    r.com_st,
+                    r.descricao,
+                    r.fonte,
+                    r.dispositivo,
+                    r.consultada_em,
+                    r.inicio_informado
+                ],
+            )?;
+            if n > 0 {
+                corrigidas.push(format!("{} CEST {}: {}", r.uf, r.cest_inicio, r.descricao));
+            }
         }
-        entraram += tx.execute(
-            "INSERT OR IGNORE INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, fonte,
-                                             dispositivo, consultada_em, origem)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'rustinho')",
-            params![
-                r.id,
-                r.uf,
-                r.cest_inicio,
-                r.vigente_de,
-                r.vigente_ate,
-                r.com_st,
-                r.descricao,
-                r.fonte,
-                r.dispositivo,
-                r.consultada_em
-            ],
-        )?;
     }
+    if !corrigidas.is_empty() {
+        let disp = config::ler(tx, "dispositivo_id")?.unwrap_or_default();
+        corrigidas.insert(0, format!("Regras do programa corrigidas pela versão {} do catálogo", catalogo.versao));
+        auditoria::registrar(tx, &disp, None, "fiscal.catalogo", "regra_st", "", &corrigidas)?;
+    }
+    config::gravar(tx, CHAVE_PULADAS, &puladas.join("\n"))?;
     config::gravar(tx, CHAVE_CATALOGO, &catalogo.versao.to_string())?;
     Ok(entraram)
 }
@@ -1093,6 +1248,49 @@ mod testes {
     }
     use crate::banco::Banco;
 
+    /// C-M7 da R1: sem regra (sem UF, sem CEST, UF sem regra para o CEST, data fora das vigências), o Rustinho não
+    /// presume: o CSOSN e o CFOP ficam a definir; o CSOSN escolhido à mão continua valendo. A conferência lista as
+    /// peças a definir.
+    #[test]
+    fn r1_cm7_sem_regra_nao_presume() {
+        let b = Banco::em_memoria().unwrap();
+        for (uf, cest, data, o_que) in [
+            ("AL", "01.001.00", "2026-11-26", "UF sem regra"),
+            ("", "01.001.00", "2026-11-26", "sem UF"),
+            ("SP", "", "2026-11-26", "sem CEST"),
+            ("RS", "16.001.00", "2020-01-01", "data antes das vigências"),
+        ] {
+            let t = tributacao(&b.conn, uf, cest, "", data).unwrap();
+            assert_eq!((t.csosn.as_str(), t.cfop.as_str(), t.decidido), ("", "", false), "{o_que}: {t:?}");
+            assert!(t.alerta.is_empty(), "{o_que}: não é conflito, é falta de regra");
+        }
+        let manual = tributacao(&b.conn, "AL", "01.001.00", "500", "2026-11-26").unwrap();
+        assert_eq!((manual.csosn.as_str(), manual.cfop.as_str(), manual.decidido), ("500", "5405", true));
+        let com_regra = tributacao(&b.conn, "SP", "01.001.00", "", "2026-11-26").unwrap();
+        assert_eq!((com_regra.csosn.as_str(), com_regra.decidido), ("102", true));
+
+        use serde_json::{json, Value};
+        let mut s = crate::Servico::em_memoria().unwrap();
+        let chamar = |s: &mut crate::Servico, cmd: &str, d: Value| -> Value {
+            let r: Value = serde_json::from_str(&s.chamar(cmd, &d.to_string())).unwrap();
+            assert_eq!(r["ok"], true, "{cmd}: {r}");
+            r["dados"].clone()
+        };
+        chamar(
+            &mut s,
+            "configurar_inicio",
+            json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
+        );
+        let mut f = chamar(&mut s, "produto_novo", json!({}));
+        f["nome"] = json!("Filtro sem CEST");
+        f["custo"] = json!("10");
+        f["chaveOperacao"] = json!("peca-cm7");
+        chamar(&mut s, "produto_salvar", f);
+        let c = chamar(&mut s, "fiscal_conferir", json!({}));
+        let lista = c["aDefinir"].as_array().unwrap();
+        assert!(lista.iter().any(|p| p["nome"] == "Filtro sem CEST" && p["csosn"] == "a definir"), "{c}");
+    }
+
     #[test]
     fn autopecas_sp_saem_da_st_em_outubro_de_2026() {
         let b = Banco::em_memoria().unwrap();
@@ -1161,7 +1359,7 @@ mod testes {
     fn fis_p6_o_catalogo_do_programa_entra_uma_vez_e_respeita_a_loja() {
         let b = Banco::em_memoria().unwrap();
         let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
-        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("1"));
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("2"));
         assert_eq!(carregar_regras_do_programa(&b.conn).unwrap(), 0, "a mesma versão não aplica de novo");
         // A regra que saiu deste banco (por exemplo, a exclusão que veio de outro caixa) não volta na mesma versão.
         b.conn.execute("DELETE FROM regra_st WHERE id = 'ba-pneus-com-st'", []).unwrap();
@@ -1190,9 +1388,209 @@ mod testes {
         assert!(lista.iter().any(|r| r.id == "go-pneus-com-st" && r.origem == "rustinho"));
         assert!(lista.iter().any(|r| r.id == "ba-pneus-com-st" && r.origem == "rustinho"));
         assert!(!lista.iter().any(|r| r.id == "rs-pneus-com-st" || r.id == "rs-pneus-sem-st"));
+        // C-M6 da R1: as duas do programa que a regra da loja impediu aparecem como aviso, sem sumir em silêncio.
+        let puladas = conferir(&b.conn, "2026-11-26").unwrap().regras_puladas;
+        assert_eq!(puladas.len(), 2, "{puladas:?}");
+        assert!(puladas.iter().all(|p| p.starts_with("RS CEST 16") && p.contains("regra própria")), "{puladas:?}");
         let aplicando: i64 =
             b.conn.query_row("SELECT aplicando FROM sync_estado WHERE id = 1", [], |l| l.get(0)).unwrap();
         assert_eq!(aplicando, 0, "o registro da troca volta a ficar ligado");
+    }
+
+    /// F2-3 (a) da R1: o segmento 16 não é inteiro onde a lista da UF deixa itens de fora (PR, SC, PB, BA e RN: os
+    /// recauchutados; GO e RR: também os de bicicleta). RR traz os protetores de bicicleta (o art. 783, III, exclui só
+    /// pneus e câmaras). Onde a fonte lida só traz o segmento (PE), o segmento vale inteiro.
+    #[test]
+    fn r1_f23a_excecoes_da_lista_de_pneus_de_cada_uf() {
+        let b = Banco::em_memoria().unwrap();
+        let hoje = hoje(&b.conn).unwrap();
+        let st = |uf: &str, cest: &str| tributacao(&b.conn, uf, cest, "", &hoje).unwrap().com_st;
+        for uf in ["PR", "SC", "PB", "BA", "RN", "GO", "RR"] {
+            assert_eq!(st(uf, "16.001.00"), Some(true), "{uf}: pneu de automóvel");
+            assert_eq!(st(uf, "16.006.00"), Some(false), "{uf}: recauchutado fora da lista");
+        }
+        for uf in ["GO", "RR"] {
+            assert_eq!(st(uf, "16.005.00"), Some(false), "{uf}: pneu de bicicleta");
+            assert_eq!(st(uf, "16.009.00"), Some(false), "{uf}: câmara de bicicleta");
+        }
+        assert_eq!(st("RR", "16.007.01"), Some(true), "RR: protetor de bicicleta continua");
+        assert_eq!(st("RR", "16.008.00"), Some(true));
+        assert_eq!(st("PR", "16.005.00"), Some(true), "PR traz o de bicicleta");
+        assert_eq!(st("PE", "16.006.00"), Some(true), "PE: o segmento inteiro");
+        let rr = tributacao(&b.conn, "RR", "16.005.00", "", &hoje).unwrap();
+        assert_eq!((rr.csosn.as_str(), rr.cfop.as_str()), ("102", "5102"));
+    }
+
+    /// F2-3 (b) da R1: a data da regra é legal só quando a fonte informa o início; senão, é a data em que foi conferida
+    /// valendo, e a tela não a mostra como "desde".
+    #[test]
+    fn r1_f23b_inicio_informado_so_com_a_fonte() {
+        let b = Banco::em_memoria().unwrap();
+        let lista = regras(&b.conn).unwrap();
+        for (id, informado) in [
+            ("pr-pneus-com-st", false),
+            ("pb-autopecas-com-st", false),
+            ("mt-autopecas-com-st", false),
+            ("sp-autopecas-com-st", false),
+            ("sp-autopecas-sem-st", true),
+            ("rs-pneus-sem-st", true),
+            ("sc-autopecas-sem-st", true),
+            ("rr-pneus-16005-sem-st", false),
+        ] {
+            assert_eq!(achar(&lista, id).inicio_informado, informado, "{id}");
+        }
+    }
+
+    /// C-M5 da R1: a 0032 só carimba a fonte oficial na regra de SP que está exatamente como a 0002 a criou; a que a
+    /// loja mudou continua da loja, sem fonte.
+    #[test]
+    fn r1_cm5_a_0032_nao_carimba_a_regra_que_a_loja_mudou() {
+        let mut c = rusqlite::Connection::open_in_memory().unwrap();
+        crate::banco::registrar_funcoes(&c).unwrap();
+        crate::banco::migrar_ate(&mut c, 31).unwrap();
+        c.execute("UPDATE regra_st SET descricao = 'Mudada pelo contador' WHERE id = 'sp-autopecas-com-st'", [])
+            .unwrap();
+        c.execute("UPDATE regra_st SET vigente_ate = '2027-06-30' WHERE id = 'sp-pneus-sem-st'", []).unwrap();
+        crate::banco::migrar(&mut c).unwrap();
+        let linha = |id: &str| -> (String, String) {
+            c.query_row("SELECT origem, fonte FROM regra_st WHERE id = ?1", [id], |l| Ok((l.get(0)?, l.get(1)?)))
+                .unwrap()
+        };
+        assert_eq!(linha("sp-autopecas-com-st"), ("loja".to_string(), String::new()));
+        assert_eq!(linha("sp-pneus-sem-st"), ("loja".to_string(), String::new()));
+        assert_eq!(linha("sp-autopecas-sem-st").0, "rustinho");
+        assert!(linha("sp-pneus-com-st").1.contains("SRE 34/2026"));
+    }
+
+    /// C-M6 da R1: a versão nova do catálogo corrige a linha do programa que a loja não mudou (com registro), e não
+    /// toca na que a loja mudou.
+    #[test]
+    fn r1_cm6_o_catalogo_corrige_a_linha_do_programa_e_nao_a_da_loja() {
+        let b = Banco::em_memoria().unwrap();
+        b.conn
+            .execute(
+                "UPDATE regra_st SET descricao = 'versão errada', inicio_informado = 1 WHERE id = 'pr-pneus-com-st'",
+                [],
+            )
+            .unwrap();
+        b.conn
+            .execute("UPDATE regra_st SET descricao = 'da loja', origem = 'loja' WHERE id = 'rr-pneus-com-st'", [])
+            .unwrap();
+        config::gravar(&b.conn, CHAVE_CATALOGO, "1").unwrap();
+        crate::sync::sem_registrar(&b.conn, carregar_regras_do_programa).unwrap();
+        let lista = regras(&b.conn).unwrap();
+        let pr = achar(&lista, "pr-pneus-com-st");
+        assert_eq!((pr.descricao.as_str(), pr.inicio_informado), ("Pneus e câmaras com ST", false));
+        assert_eq!(achar(&lista, "rr-pneus-com-st").descricao, "da loja");
+        let registro: String = b
+            .conn
+            .query_row("SELECT detalhes FROM auditoria WHERE acao = 'fiscal.catalogo'", [], |l| l.get(0))
+            .unwrap();
+        assert!(registro.contains("PR CEST 16") && !registro.contains("RR CEST 16 "), "{registro}");
+        // De novo, nada muda (a mesma versão).
+        assert_eq!(crate::sync::sem_registrar(&b.conn, carregar_regras_do_programa).unwrap(), 0);
+    }
+
+    /// B3 da R1: a regra que já terminou não volta a valer (estender o fim reabriria dias que já passaram); a que está
+    /// valendo pode ter o fim mudado para depois de ontem.
+    #[test]
+    fn r1_b3_a_regra_que_ja_terminou_nao_volta_a_valer() {
+        let b = Banco::em_memoria().unwrap();
+        let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+        let velha = RegraSt {
+            uf: "AL".into(),
+            cest_inicio: "01".into(),
+            vigente_de: dia(&b, -60),
+            vigente_ate: dia(&b, -30),
+            com_st: true,
+            ..Default::default()
+        };
+        let id = salvar_regra(&b.conn, &b.dispositivo, &u.id, &velha).unwrap();
+        let mut estendida = achar(&regras(&b.conn).unwrap(), &id).clone();
+        estendida.vigente_ate = dia(&b, 30);
+        assert!(salvar_regra(&b.conn, &b.dispositivo, &u.id, &estendida).is_err());
+        estendida.vigente_ate = String::new();
+        assert!(salvar_regra(&b.conn, &b.dispositivo, &u.id, &estendida).is_err(), "nem sem fim");
+        assert_eq!(achar(&regras(&b.conn).unwrap(), &id).vigente_ate, dia(&b, -30));
+        // A que está valendo: o fim muda para a frente.
+        let atual = RegraSt {
+            uf: "AL".into(),
+            cest_inicio: "16".into(),
+            vigente_de: dia(&b, -10),
+            vigente_ate: dia(&b, 10),
+            com_st: true,
+            ..Default::default()
+        };
+        let id2 = salvar_regra(&b.conn, &b.dispositivo, &u.id, &atual).unwrap();
+        let mut mais = achar(&regras(&b.conn).unwrap(), &id2).clone();
+        mais.vigente_ate = dia(&b, 40);
+        salvar_regra(&b.conn, &b.dispositivo, &u.id, &mais).unwrap();
+    }
+
+    /// B6 da R1: um erro ao aplicar o catálogo não impede abrir o banco (fica anotado; a próxima abertura tenta de novo).
+    #[test]
+    fn r1_b6_erro_no_catalogo_nao_impede_abrir_o_banco() {
+        let pasta = std::env::temp_dir().join(format!("rustinho-b6-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let caminho = pasta.join("rustinho.db");
+        {
+            let b = Banco::abrir(&caminho).unwrap();
+            config::gravar(&b.conn, CHAVE_CATALOGO, "0").unwrap();
+            b.conn
+                .execute_batch("CREATE TEMP TABLE x (y); DELETE FROM regra_st WHERE id = 'go-pneus-com-st';")
+                .unwrap();
+        }
+        {
+            let c = rusqlite::Connection::open(&caminho).unwrap();
+            c.execute_batch(
+                "CREATE TRIGGER t_b6 BEFORE INSERT ON regra_st BEGIN SELECT RAISE(ABORT, 'falha de teste'); END;",
+            )
+            .unwrap();
+        }
+        let b = Banco::abrir(&caminho).expect("o banco abre mesmo com o catálogo falhando");
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("0"), "nada do catálogo gravado");
+        b.conn.execute_batch("DROP TRIGGER t_b6;").unwrap();
+        drop(b);
+        let b = Banco::abrir(&caminho).unwrap();
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("2"), "a próxima abertura aplica");
+        assert!(regras(&b.conn).unwrap().iter().any(|r| r.id == "go-pneus-com-st"));
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// F2-4, G5, G6 e G8 da R1.
+    #[test]
+    fn r1_t019_substituto_monofasico_modelo_e_devolucao() {
+        let b = Banco::em_memoria().unwrap();
+        for csosn in ["201", "202", "203"] {
+            let t = tributacao(&b.conn, "SP", "01.001.00", csosn, "2026-11-26").unwrap();
+            assert_eq!(t.cfop, "5403");
+            assert!(t.alerta.contains("só vale na NF-e") && t.alerta.contains("383"), "{csosn}: {}", t.alerta);
+        }
+        assert!(tributacao(&b.conn, "SP", "01.001.00", "102", "2026-11-26").unwrap().alerta.is_empty());
+        // G5: o monofásico vale até 31/12/2026.
+        assert!(monofasico_vale("2026-12-31"));
+        assert!(!monofasico_vale("2027-01-01"));
+        assert!(!conferir(&b.conn, "2027-01-02").unwrap().monofasico_vale);
+        // G6: crédito do ICMS para o comprador → NF-e, desde 05/10/2026.
+        assert_eq!(modelo_da_venda(true, "2026-11-26"), 55);
+        assert_eq!(modelo_da_venda(false, "2026-11-26"), 65);
+        assert_eq!(modelo_da_venda(true, "2026-10-04"), 65, "antes dos efeitos do ajuste");
+        // G8: o CFOP da devolução pela operação de origem; fora do mapa, nada é presumido.
+        for (de, para) in [
+            ("5.102", "1202"),
+            ("6102", "2202"),
+            ("5405", "1411"),
+            ("5403", "1411"),
+            ("6404", "2411"),
+            ("1102", "5202"),
+            ("2.102", "6202"),
+            ("1403", "5411"),
+            ("2403", "6411"),
+        ] {
+            assert_eq!(cfop_da_devolucao(de), Some(para), "{de}");
+        }
+        assert_eq!(cfop_da_devolucao("5949"), None);
     }
 
     #[test]
@@ -1222,7 +1620,7 @@ mod testes {
     fn fis_p6_as_regras_do_programa_tem_fonte() {
         let b = Banco::em_memoria().unwrap();
         let lista = regras(&b.conn).unwrap();
-        assert_eq!(lista.len(), 37);
+        assert_eq!(lista.len(), 48, "4 de SP (0002/0032) e 44 do catálogo, versão 2");
         for r in &lista {
             assert_eq!(r.origem, "rustinho", "{}", r.id);
             assert!(!r.fonte.is_empty() && !r.dispositivo.is_empty() && !r.consultada_em.is_empty(), "{}", r.id);
@@ -1263,7 +1661,8 @@ mod testes {
         assert_eq!(tributacao(&b.conn, "SP", "0100100", "", "2026-10-13").unwrap().csosn, "102");
         let lista = regras(&b.conn).unwrap();
         assert_eq!(achar(&lista, &id).origem, "loja");
-        assert_eq!(lista.len(), 38);
+        assert!(achar(&lista, &id).inicio_informado, "a regra da loja tem o início que o gerente digitou");
+        assert_eq!(lista.len(), 49);
 
         assert_eq!(ler_data("1/10/26").unwrap().unwrap(), "2026-10-01");
         assert!(ler_data("31/02/2026").is_err());

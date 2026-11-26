@@ -23,8 +23,12 @@ ColumnLayout {
     // T010b: o que foi achado nas notas da loja (null = ainda não procurou).
     property var achado: null
 
-    function descobrir(pasta) {
-        const r = Api.chamar("fiscal_descobrir", { entradas: [Api.caminho(pasta.toString())] })
+    // A pasta escolhida (para ler de novo com o emitente que for a loja).
+    property string pastaLida: ""
+
+    function descobrir(pasta, cnpj) {
+        pastaLida = pasta
+        const r = Api.chamar("fiscal_descobrir", { entradas: [pasta], cnpj: cnpj || "" })
         if (!r.ok) {
             emissao.janela.avisar(r.erro, "erro")
             return
@@ -33,8 +37,9 @@ ColumnLayout {
         painelDescoberta.open()
     }
 
-    function usar(campo, valor, nome) {
-        emissao.janela.chamarGerente("fiscal_descoberta_usar", { campo: campo, valor: String(valor) }, r => {
+    function usar(campo, valor, nome, ambiente, ultimoNumero) {
+        emissao.janela.chamarGerente("fiscal_descoberta_usar", { campo: campo, valor: String(valor),
+                                                                 ambiente: ambiente || 0, ultimoNumero: ultimoNumero || 0 }, r => {
             if (r.ok)
                 emissao.janela.avisar(nome + " confirmado.", "ok")
             else
@@ -190,7 +195,7 @@ ColumnLayout {
         id: seletorDescoberta
         title: "Escolha a pasta com os XML das notas que a loja já emitiu"
         currentFolder: StandardPaths.standardLocations(StandardPaths.DocumentsLocation)[0]
-        onAccepted: emissao.descobrir(selectedFolder)
+        onAccepted: emissao.descobrir(Api.caminho(selectedFolder.toString()), "")
     }
 
     // T010b: o que foi achado, item por item; nada se grava sem o "Usar este".
@@ -210,15 +215,58 @@ ColumnLayout {
                 spacing: 12
                 Titulo { text: "O que achei nas notas da loja"; font.pixelSize: 26; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 Nota {
-                    text: !painelDescoberta.d ? "" : (painelDescoberta.d.lidas === 1 ? "1 nota autorizada lida" : painelDescoberta.d.lidas + " notas autorizadas lidas")
+                    text: !painelDescoberta.d ? ""
+                          : painelDescoberta.d.candidatos.length > 0
+                            ? painelDescoberta.d.candidatos.reduce((t, c) => t + c.notas, 0) + " notas autorizadas lidas, de "
+                              + painelDescoberta.d.candidatos.length + " emitentes"
+                            : (painelDescoberta.d.lidas === 1 ? "1 nota autorizada lida" : painelDescoberta.d.lidas + " notas autorizadas lidas")
                           + (painelDescoberta.d.ignorados.length ? " · " + painelDescoberta.d.ignorados.length + " arquivos deixados de lado (não autorizados, de outro emitente ou sem leitura)" : "")
                           + ". Nada é gravado sem você confirmar."
                     font.pixelSize: 14
                     Layout.fillWidth: true
                 }
                 Nota {
-                    visible: !!painelDescoberta.d && painelDescoberta.d.lidas === 0
+                    visible: !!painelDescoberta.d && painelDescoberta.d.lidas === 0 && painelDescoberta.d.candidatos.length === 0
                     text: "Não achei nota autorizada da loja nesta pasta."
+                    Layout.fillWidth: true
+                }
+                // C-M8 da R1: com notas de mais de um emitente (por exemplo, notas de compra), o Rustinho pergunta.
+                Rotulo {
+                    visible: !!painelDescoberta.d && painelDescoberta.d.candidatos.length > 0
+                    text: "Qual destes CNPJ é o da loja?"
+                }
+                Nota {
+                    visible: !!painelDescoberta.d && painelDescoberta.d.candidatos.length > 0
+                    text: "A pasta tem notas de mais de um emitente (pode ter notas de compra). Escolha o da loja; os outros ficam de lado."
+                    Layout.fillWidth: true
+                }
+                Repeater {
+                    model: painelDescoberta.d ? painelDescoberta.d.candidatos : []
+                    delegate: RowLayout {
+                        id: linhaCandidato
+                        required property var modelData
+                        spacing: 10
+                        Layout.fillWidth: true
+                        Text {
+                            text: linhaCandidato.modelData.cnpj + " · " + linhaCandidato.modelData.notas
+                                  + (linhaCandidato.modelData.notas === 1 ? " nota" : " notas")
+                            textFormat: Text.PlainText
+                            color: Tema.tinta
+                            font.family: Tema.texto
+                            font.pixelSize: 15
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Botao {
+                            text: "É o da loja"
+                            tipo: "discreto"
+                            onClicked: emissao.descobrir(emissao.pastaLida, linhaCandidato.modelData.cnpj)
+                        }
+                    }
+                }
+                Nota {
+                    visible: !!painelDescoberta.d && painelDescoberta.d.qrVersao3 && !painelDescoberta.d.identificadorCsc
+                    text: "As NFC-e da loja usam o QR Code versão 3, que não usa CSC: não é preciso pedir o CSC ao contador."
                     Layout.fillWidth: true
                 }
                 Repeater {
@@ -272,6 +320,8 @@ ColumnLayout {
                                   + (linhaSerie.modelData.ambiente === 1 ? " (produção)" : " (homologação)")
                                   + ": último número " + linhaSerie.modelData.ultimoNumero + " · " + linhaSerie.modelData.notas
                                   + (linhaSerie.modelData.notas === 1 ? " nota" : " notas")
+                                  + (linhaSerie.modelData.ambiente === 1 ? ". Usando esta série, a próxima nota do Rustinho sai depois da "
+                                                                           + linhaSerie.modelData.ultimoNumero + "." : "")
                             textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
@@ -279,12 +329,14 @@ ColumnLayout {
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
+                        // C-M4 da R1: usar a série grava também a última nota dela, e a próxima do Rustinho sai depois.
                         Botao {
                             visible: linhaSerie.modelData.ambiente === 1
                             text: "Usar esta série"
                             tipo: "discreto"
                             onClicked: emissao.usar(linhaSerie.modelData.modelo === 65 ? "serieNfce" : "serieNfe", linhaSerie.modelData.serie,
-                                                    "A série da " + (linhaSerie.modelData.modelo === 65 ? "NFC-e" : "NF-e"))
+                                                    "A série da " + (linhaSerie.modelData.modelo === 65 ? "NFC-e" : "NF-e"),
+                                                    linhaSerie.modelData.ambiente, linhaSerie.modelData.ultimoNumero)
                         }
                     }
                 }

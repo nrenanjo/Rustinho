@@ -297,10 +297,17 @@ impl Banco {
         crate::sync::criar_gatilhos(&conn)?;
         crate::sync::registrar_existentes(&conn)?;
         // FIS-P6 (0.9.19, etapa 3): as regras de ST que vêm com o programa (uma vez por versão do catálogo).
+        // B6 da R1: um erro aqui não impede abrir o banco (a venda não para por causa do catálogo): fica anotado, nada
+        // do catálogo é gravado (a transação se desfaz) e a próxima abertura tenta de novo.
         {
             let tx = conn.transaction()?;
-            crate::sync::sem_registrar(&tx, crate::fiscal::carregar_regras_do_programa)?;
-            tx.commit()?;
+            match crate::sync::sem_registrar(&tx, crate::fiscal::carregar_regras_do_programa) {
+                Ok(_) => tx.commit()?,
+                Err(e) => {
+                    drop(tx);
+                    crate::registro::anotar(&format!("regras de ST do programa: não aplicadas nesta abertura: {e}"));
+                }
+            }
         }
         crate::backup::limpar_chave_antiga(&conn)?;
         // Códigos das peças: arquivo ao lado do banco, distribuidor e

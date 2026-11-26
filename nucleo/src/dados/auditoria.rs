@@ -132,6 +132,7 @@ fn descrever(acao: &str) -> &'static str {
         // R6 (D-AUD-5, 25/11/2026): o descarte da pendência de identificação do XML, com o motivo.
         "xml_pendencia.descartar" => "descartou a pendência do XML",
         "fiscal.regras" => "mudou as regras de ST",
+        "fiscal.catalogo" => "corrigiu as regras de ST que vêm com o programa",
         "fiscal.ligar" => "ligou o uso do certificado A3 e a integração fiscal",
         "fiscal.ambiente" => "trocou o ambiente fiscal",
         "fiscal.descoberta" => "confirmou um dado fiscal tirado das notas da loja",

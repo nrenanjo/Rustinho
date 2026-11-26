@@ -2046,7 +2046,13 @@ impl Pendente {
                 let (k, v) = l?;
                 // N-I1 (D-I2): a marca da 5.2 é do banco, e não deste caixa:
                 // fica a do banco que entra.
-                if !da_loja.contains(&k.as_str()) && !sync::marca_das_que_passaram_a_viajar(&k) {
+                // C-M6 da R1: a versão do catálogo de regras é a do banco que entra (ela diz que regras ele já tem):
+                // com a deste computador, um backup antigo voltaria sem as regras do programa e sem quem as pusesse.
+                if !da_loja.contains(&k.as_str())
+                    && !sync::marca_das_que_passaram_a_viajar(&k)
+                    && k != crate::fiscal::CHAVE_CATALOGO
+                    && k != crate::fiscal::CHAVE_PULADAS
+                {
                     locais.push((k, v));
                 }
             }
@@ -2232,6 +2238,20 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
 #[cfg(test)]
 pub(crate) mod testes {
     use super::*;
+
+    /// C-M6 da R1: a restauração não preserva a versão do catálogo de regras deste computador (nem o aviso das
+    /// puladas): fica a do banco que entra, e o catálogo se aplica de novo ao abrir se ele for de antes.
+    #[test]
+    fn r1_cm6_restauracao_nao_preserva_a_versao_do_catalogo() {
+        let b = crate::banco::Banco::em_memoria().unwrap();
+        crate::config::gravar(&b.conn, crate::fiscal::CHAVE_PULADAS, "RS CEST 16 (x): a loja já tem regra própria")
+            .unwrap();
+        let p = Pendente::ler(&b.conn).unwrap();
+        let chaves: Vec<&str> = p.locais.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(chaves.contains(&"dispositivo_id"), "o resto do que é deste computador continua preservado");
+        assert!(!chaves.contains(&crate::fiscal::CHAVE_CATALOGO), "{chaves:?}");
+        assert!(!chaves.contains(&crate::fiscal::CHAVE_PULADAS), "{chaves:?}");
+    }
     use crate::banco::Banco;
 
     /// Restaurar usa a vez única do backup: um teste desses de cada vez.

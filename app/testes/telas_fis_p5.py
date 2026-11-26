@@ -87,7 +87,9 @@ def main():
             time.sleep(3)
             tudo_certo &= conferir("FIS-P5: as regras do estado, separadas e com a fonte", r.foto("-1"), r.textos(),
                                    tem=["Valendo hoje", "Encerradas", "CEST 01 · sem ST · desde 01/10/2026",
-                                        "Fonte: Portaria SRE 34/2026", "lida em 24/11/2026"])
+                                        "CEST 01 · com ST · até 30/09/2026 (início não informado na fonte)",
+                                        "Fonte: Portaria SRE 34/2026", "lida em 24/11/2026"],
+                                   nao_tem=["desde 01/01/2000"])
             tudo_certo &= conferir("FIS-P4: a sequência emissor → certificado → testar → condições, sem repetir", r.foto("-1a"),
                                    r.textos(), tem=["Para emitir notas pelo Rustinho", "1. Emissor fiscal · ainda não disponível",
                                                     "2. Certificado A3 · desligado neste computador", "3. Testar a conexão",

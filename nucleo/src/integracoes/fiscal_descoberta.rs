@@ -6,9 +6,14 @@
 //!
 //! Campos (MOC 7.0, Anexo I): `emit/CNPJ` (C02), `emit/IE` (C17), `emit/enderEmit/UF` (C12), `emit/CRT` (C21),
 //! `ide/mod` (B06), `ide/serie` (B07), `ide/nNF` (B08), `ide/tpAmb` (B24). O identificador do CSC vem do QR Code da
-//! NFC-e (`infNFeSupl/qrCode`), versão 2: o 4º parâmetro na emissão online
+//! NFC-e (`infNFeSupl/qrCode`), **só na versão 2**: o 4º parâmetro na emissão online
 //! (`p=<chave>|2|<tpAmb>|<identificador_csc>|<hash>`) e o 7º na off-line (Manual do DANFE NFC-e e QR Code v6.0,
-//! tabelas 2 e 3). **O CSC (o segredo) não está no XML** e continua pedido ao proprietário.
+//! tabelas 2 e 3). **O CSC (o segredo) não está no XML** e continua pedido ao proprietário. Na versão 3 (item 4.4 do
+//! manual: `p=<chave>|3|<tpAmb>` online; 8 campos off-line, o 7º é o documento do destinatário) não há CSC: a
+//! autenticidade vem da assinatura do próprio QR Code (C-M8 da R1).
+//!
+//! Sem o CNPJ da loja informado e com mais de um emitente na pasta (a pasta pode ter notas de compra), a descoberta
+//! não escolhe: devolve os candidatos e a tela pergunta qual é a loja.
 
 use std::collections::BTreeMap;
 
@@ -44,14 +49,27 @@ pub struct Descoberta {
     /// 1 Simples Nacional, 2 excesso de sublimite, 3 Regime Normal (4 MEI, NT 2025.002).
     pub crt: Option<Achado>,
     pub identificador_csc: Option<Achado>,
+    /// Alguma nota da loja usa o QR Code versão 3 (sem CSC).
+    pub qr_versao_3: bool,
     pub series: Vec<Serie>,
+    /// Sem o CNPJ da loja e com mais de um emitente: os emitentes achados (CNPJ e quantas notas), para a tela
+    /// perguntar qual é a loja. Enquanto isso, nenhum dado sai.
+    pub candidatos: Vec<Candidato>,
     /// Quantos XML foram lidos como notas autorizadas da loja.
     pub lidas: i64,
     /// Arquivos deixados de lado, com o motivo (não autorizado, não é NF-e/NFC-e, de outro emitente...).
     pub ignorados: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Candidato {
+    pub cnpj: String,
+    pub notas: i64,
+}
+
 struct Nota {
+    qr_versao: String,
     chave: String,
     cnpj: String,
     ie: String,
@@ -77,10 +95,19 @@ fn descendente<'a, 'b>(no: roxmltree::Node<'a, 'b>, nome: &str) -> Option<roxmlt
     no.descendants().find(|n| n.is_element() && n.tag_name().name() == nome)
 }
 
-/// O identificador do CSC no QR Code v2 (o 4º parâmetro online; o 7º off-line). Vazio se não houver.
+/// A versão do QR Code da NFC-e (o 2º parâmetro), ou vazio.
+pub fn versao_do_qrcode(qr: &str) -> String {
+    qr.split("p=").nth(1).and_then(|p| p.split('|').nth(1)).unwrap_or("").trim().to_string()
+}
+
+/// O identificador do CSC no QR Code **v2** (o 4º parâmetro online; o 7º off-line). Vazio se não houver, ou se o QR
+/// for de outra versão (na v3, o 7º off-line é o documento do destinatário).
 pub fn identificador_csc_do_qrcode(qr: &str) -> String {
     let Some(p) = qr.split("p=").nth(1) else { return String::new() };
     let partes: Vec<&str> = p.split('|').collect();
+    if partes.get(1).map(|v| v.trim()) != Some("2") {
+        return String::new();
+    }
     let campo = match partes.len() {
         5 => partes[3],
         8 => partes[6],
@@ -103,6 +130,7 @@ fn ler_nota(xml: &str) -> Result<Nota, String> {
     let chave = inf.attribute("Id").unwrap_or("").trim_start_matches("NFe").to_string();
     let qr = descendente(raiz, "qrCode").and_then(|n| n.text()).unwrap_or("");
     Ok(Nota {
+        qr_versao: versao_do_qrcode(qr),
         chave,
         cnpj: texto_de(filho(emit, "CNPJ")),
         ie: texto_de(filho(emit, "IE")),
@@ -129,8 +157,9 @@ fn achado(notas: &[&Nota], campo: impl Fn(&Nota) -> &str) -> Option<Achado> {
     Some(Achado { valor, chave_da_nota: primeira.chave.clone(), outros })
 }
 
-/// Lê os XML (nome do arquivo, conteúdo). `cnpj_da_loja`: se informado, só as notas desse emitente contam; vazio,
-/// o emitente mais frequente é tomado como a loja, e os outros ficam em `ignorados`.
+/// Lê os XML (nome do arquivo, conteúdo). `cnpj_da_loja`: se informado, só as notas desse emitente contam. Vazio:
+/// com um emitente só, ele é a loja; com mais de um, nenhum dado sai e os emitentes vão em `candidatos` (a tela
+/// pergunta qual é a loja e lê de novo com o escolhido).
 pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> Descoberta {
     let mut d = Descoberta::default();
     let mut notas = Vec::new();
@@ -143,11 +172,17 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
     let loja = if !cnpj_da_loja.trim().is_empty() {
         crate::documento::digitos(cnpj_da_loja)
     } else {
-        let mut conta: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut conta: BTreeMap<String, i64> = BTreeMap::new();
         for n in &notas {
-            *conta.entry(n.cnpj.as_str()).or_default() += 1;
+            *conta.entry(crate::documento::digitos(&n.cnpj)).or_default() += 1;
         }
-        conta.into_iter().max_by_key(|(_, q)| *q).map(|(c, _)| c.to_string()).unwrap_or_default()
+        if conta.len() > 1 {
+            let mut c: Vec<Candidato> = conta.into_iter().map(|(cnpj, notas)| Candidato { cnpj, notas }).collect();
+            c.sort_by(|a, b| b.notas.cmp(&a.notas).then(a.cnpj.cmp(&b.cnpj)));
+            d.candidatos = c;
+            return d;
+        }
+        conta.into_keys().next().unwrap_or_default()
     };
     let (da_loja, outras): (Vec<&Nota>, Vec<&Nota>) =
         notas.iter().partition(|n| crate::documento::digitos(&n.cnpj) == loja);
@@ -160,6 +195,7 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
     d.uf = achado(&da_loja, |n| n.uf.as_str());
     d.crt = achado(&da_loja, |n| n.crt.as_str());
     d.identificador_csc = achado(&da_loja, |n| n.id_csc.as_str());
+    d.qr_versao_3 = da_loja.iter().any(|n| n.qr_versao == "3");
     let mut series: BTreeMap<(i64, i64, i64), (i64, i64)> = BTreeMap::new();
     for n in &da_loja {
         let e = series.entry((n.ambiente, n.modelo, n.serie)).or_default();
@@ -191,13 +227,16 @@ pub fn chave_de(campo: &str) -> Option<&'static str> {
     }
 }
 
-/// Grava um dado confirmado na tela, com registro.
+/// Grava um dado confirmado na tela, com registro. Na série, `ultimo` traz o ambiente e o último número já
+/// autorizado nela (das notas lidas): vira o piso da numeração (`nota_fiscal::chave_do_piso`), para o Rustinho não
+/// repetir um número que o sistema de antes já usou (C-M4 da R1). O piso só sobe.
 pub fn usar(
     tx: &rusqlite::Connection,
     dispositivo: &str,
     usuario_id: &str,
     campo: &str,
     valor: &str,
+    ultimo: Option<(i64, i64)>,
 ) -> crate::erro::Resultado<()> {
     let chave = chave_de(campo).ok_or_else(|| crate::erro::Erro::validacao("Este dado não se grava por aqui."))?;
     let valor: String = valor.trim().chars().take(20).collect();
@@ -209,16 +248,27 @@ pub fn usar(
     if !valido {
         return Err(crate::erro::Erro::validacao("Valor inválido para este dado."));
     }
+    if matches!(campo, "serieNfce" | "serieNfe") {
+        // C-M4 da R1: a série passa a ser deste computador (recusa a de outro).
+        let modelo = if campo == "serieNfce" { 65 } else { 55 };
+        crate::nota_fiscal::reservar_serie(tx, dispositivo, modelo, valor.parse().unwrap_or(0))?;
+    }
     crate::config::gravar(tx, chave, &valor)?;
-    crate::auditoria::registrar(
-        tx,
-        dispositivo,
-        Some(usuario_id),
-        "fiscal.descoberta",
-        "config",
-        chave,
-        &[format!("Dado fiscal confirmado a partir das notas da loja: {campo} = {valor}")],
-    )
+    let mut detalhes = vec![format!("Dado fiscal confirmado a partir das notas da loja: {campo} = {valor}")];
+    if let (Some((ambiente, numero)), "serieNfce" | "serieNfe") = (ultimo, campo) {
+        if !matches!(ambiente, 1 | 2) || !(0..=999_999_999).contains(&numero) {
+            return Err(crate::erro::Erro::validacao("Numeração inválida para esta série."));
+        }
+        let modelo = if campo == "serieNfce" { 65 } else { 55 };
+        let serie: i64 = valor.parse().unwrap_or(0);
+        let piso = crate::nota_fiscal::chave_do_piso(ambiente, modelo, serie);
+        let antes: i64 = crate::config::ler(tx, &piso)?.and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+        if numero > antes {
+            crate::config::gravar(tx, &piso, &numero.to_string())?;
+            detalhes.push(format!("A próxima nota desta série sai depois da {numero}"));
+        }
+    }
+    crate::auditoria::registrar(tx, dispositivo, Some(usuario_id), "fiscal.descoberta", "config", chave, &detalhes)
 }
 
 pub use comandos::COMANDOS;
@@ -247,6 +297,8 @@ mod comandos {
     #[serde(default)]
     struct Pasta {
         entradas: Vec<String>,
+        /// O emitente que a tela confirmou ser a loja (quando a pasta tinha mais de um).
+        cnpj: String,
     }
 
     fn fiscal_descobrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -262,7 +314,8 @@ mod comandos {
             }
         }
         let cnpj = crate::config::ler(p.conn, "loja_cnpj")?.unwrap_or_default();
-        let mut descoberta = super::descobrir_de_xml(&arquivos, &cnpj);
+        let escolhido = if cnpj.trim().is_empty() { d.cnpj.clone() } else { cnpj.clone() };
+        let mut descoberta = super::descobrir_de_xml(&arquivos, &escolhido);
         descoberta.ignorados.extend(sem_leitura);
         Ok(json!({
             "descoberta": descoberta,
@@ -274,16 +327,20 @@ mod comandos {
     }
 
     #[derive(Deserialize, Default)]
-    #[serde(default)]
+    #[serde(default, rename_all = "camelCase")]
     struct Usar {
         campo: String,
         valor: String,
+        /// Na série: o ambiente e o último número autorizado nela (0 = sem).
+        ambiente: i64,
+        ultimo_numero: i64,
     }
 
     fn fiscal_descoberta_usar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Usar = ler(dados)?;
         let tx = p.conn.transaction()?;
-        super::usar(&tx, p.disp, p.usuario_id, &d.campo, &d.valor)?;
+        let ultimo = (d.ultimo_numero > 0).then_some((d.ambiente, d.ultimo_numero));
+        super::usar(&tx, p.disp, p.usuario_id, &d.campo, &d.valor, ultimo)?;
         tx.commit()?;
         Ok(json!({ "ok": true }))
     }
@@ -349,14 +406,14 @@ mod testes {
     fn t010b_usar_grava_so_o_permitido() {
         let b = crate::banco::Banco::em_memoria().unwrap();
         let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "senha-da-ana-1", true).unwrap().id;
-        usar(&b.conn, &b.dispositivo, &u, "serieNfce", "1").unwrap();
-        usar(&b.conn, &b.dispositivo, &u, "crt", "1").unwrap();
+        usar(&b.conn, &b.dispositivo, &u, "serieNfce", "1", None).unwrap();
+        usar(&b.conn, &b.dispositivo, &u, "crt", "1", None).unwrap();
         assert_eq!(crate::config::ler(&b.conn, "fiscal_serie_nfce").unwrap().as_deref(), Some("1"));
         assert_eq!(crate::config::ler(&b.conn, "fiscal_crt").unwrap().as_deref(), Some("1"));
-        assert!(usar(&b.conn, &b.dispositivo, &u, "cnpj", "11222333000181").is_err());
-        assert!(usar(&b.conn, &b.dispositivo, &u, "serieNfe", "1000").is_err());
-        assert!(usar(&b.conn, &b.dispositivo, &u, "crt", "9").is_err());
-        assert!(usar(&b.conn, &b.dispositivo, &u, "identificadorCsc", "abc").is_err());
+        assert!(usar(&b.conn, &b.dispositivo, &u, "cnpj", "11222333000181", None).is_err());
+        assert!(usar(&b.conn, &b.dispositivo, &u, "serieNfe", "1000", None).is_err());
+        assert!(usar(&b.conn, &b.dispositivo, &u, "crt", "9", None).is_err());
+        assert!(usar(&b.conn, &b.dispositivo, &u, "identificadorCsc", "abc", None).is_err());
         let registros: i64 = b
             .conn
             .query_row("SELECT COUNT(*) FROM auditoria WHERE acao = 'fiscal.descoberta'", [], |l| l.get(0))
@@ -370,5 +427,59 @@ mod testes {
         assert_eq!(identificador_csc_do_qrcode("https://x/qrcode?p=CHAVE|2|1|000003|HASH"), "3");
         assert_eq!(identificador_csc_do_qrcode("https://x/qrcode?p=CHAVE|2|1|25|10.00|DIGVAL|000004|HASH"), "4");
         assert_eq!(identificador_csc_do_qrcode("sem parametro"), "");
+    }
+
+    /// C-M8 da R1: no QR Code versão 3 não há CSC; o 7º campo off-line é o documento do destinatário (Manual do DANFE
+    /// NFC-e v6.0, 4.4.1 e 4.4.2), e não pode virar "identificador do CSC".
+    #[test]
+    fn r1_cm8_qr_versao_3_nao_tem_csc() {
+        let off = "https://x/qrcode?p=CHAVE|3|1|25|10.00|2|12345678909|ASSINATURA";
+        assert_eq!(identificador_csc_do_qrcode(off), "", "o 7º é o CPF do destinatário");
+        assert_eq!(identificador_csc_do_qrcode("https://x/qrcode?p=CHAVE|3|1"), "");
+        assert_eq!(versao_do_qrcode(off), "3");
+        let v3 = nfce(46, 1, "x", "1").replace("|2|1|x|ABCDEF", "|3|1|25|10.00|2|12345678909|ASSINATURA");
+        let d = descobrir_de_xml(&[("v3.xml".into(), v3)], "11222333000181");
+        assert_eq!(d.lidas, 1);
+        assert!(d.identificador_csc.is_none());
+        assert!(d.qr_versao_3);
+    }
+
+    /// C-M8 da R1: sem o CNPJ da loja e com mais de um emitente (notas de compra na pasta), a descoberta não escolhe
+    /// pela maioria: devolve os candidatos e nenhum dado; com o escolhido, lê.
+    #[test]
+    fn r1_cm8_mais_de_um_emitente_pergunta_qual_e_a_loja() {
+        let loja = nfce(47, 1, "000001", "1");
+        let fornecedor = |n: i64| nfce(n, 1, "000001", "3").replace("11222333000181", "99888777000166");
+        let arquivos = vec![("a.xml".into(), loja), ("b.xml".into(), fornecedor(48)), ("c.xml".into(), fornecedor(49))];
+        let d = descobrir_de_xml(&arquivos, "");
+        assert_eq!(
+            d.candidatos,
+            vec![
+                Candidato { cnpj: "99888777000166".into(), notas: 2 },
+                Candidato { cnpj: "11222333000181".into(), notas: 1 }
+            ]
+        );
+        assert!(d.cnpj.is_none() && d.crt.is_none() && d.series.is_empty() && d.lidas == 0);
+        let escolhida = descobrir_de_xml(&arquivos, "11222333000181");
+        assert!(escolhida.candidatos.is_empty());
+        assert_eq!(escolhida.crt.unwrap().valor, "1");
+        // Um emitente só: é a loja.
+        let so = descobrir_de_xml(&arquivos[..1], "");
+        assert_eq!(so.lidas, 1);
+    }
+
+    /// C-M4 da R1: "Usar esta série" grava também o piso da numeração (a última nota do sistema de antes), e o piso só
+    /// sobe.
+    #[test]
+    fn r1_cm4_a_serie_da_descoberta_grava_o_piso() {
+        let b = crate::banco::Banco::em_memoria().unwrap();
+        let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "senha-da-ana-1", true).unwrap().id;
+        usar(&b.conn, &b.dispositivo, &u, "serieNfce", "1", Some((1, 3452))).unwrap();
+        let piso = crate::nota_fiscal::chave_do_piso(1, 65, 1);
+        assert_eq!(crate::config::ler(&b.conn, &piso).unwrap().as_deref(), Some("3452"));
+        usar(&b.conn, &b.dispositivo, &u, "serieNfce", "1", Some((1, 100))).unwrap();
+        assert_eq!(crate::config::ler(&b.conn, &piso).unwrap().as_deref(), Some("3452"), "só sobe");
+        assert!(usar(&b.conn, &b.dispositivo, &u, "serieNfe", "2", Some((3, 10))).is_err(), "ambiente inválido");
+        assert!(!crate::sync::chave_da_loja(&piso), "o piso fica só neste computador");
     }
 }

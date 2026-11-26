@@ -1,6 +1,6 @@
 {
- "versao": 1,
- "nota": "Regras de ST que vêm com o Rustinho (FIS-P5 e FIS-P6, 0.9.19, etapa 3): só UFs com a vigência confirmada na fonte oficial (matriz _reversa_sdd/auditoria_fiscal_0919/03v2_…). Quando o início não é conhecido, a regra começa na data da consulta. Uma linha entra uma vez só (desdeVersao maior que a versão já aplicada neste computador) e nunca sobrescreve uma linha mudada na loja.",
+ "versao": 2,
+ "nota": "Regras de ST que vêm com o Rustinho (FIS-P5 e FIS-P6, 0.9.19, etapa 3): só UFs com a vigência confirmada na fonte oficial (matriz _reversa_sdd/auditoria_fiscal_0919/03v2_…). Quando a fonte não informa o início, a regra começa na data em que foi conferida valendo e fica com inicioInformado = false (a tela não mostra essa data como legal). Uma linha entra uma vez só (desdeVersao maior que a versão já aplicada neste computador) e nunca sobrescreve uma linha mudada na loja. Versão 2 (R1, 26/11/2026): inicioInformado em cada linha; as exceções da lista de cada UF no segmento 16 (PR, SC, PB, BA, RN, GO e RR) como linhas \"sem ST\" de CEST mais longo; versaoDaLinha corrige a linha do programa que a loja não mudou.",
  "regras": [
   {
    "id": "rs-autopecas-sem-st",
@@ -13,7 +13,9 @@
    "fonte": "RICMS/RS consolidado até o Dec. 59.081/2026 (legislacao.sefaz.rs.gov.br)",
    "dispositivo": "Apêndice II, Seção III, item XX revogado pelo Dec. 57.848/24 (Prots. ICMS 32/24 e 33/24)",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": true,
+   "versaoDaLinha": 2
   },
   {
    "id": "rs-pneus-com-st",
@@ -26,7 +28,9 @@
    "fonte": "RICMS/RS consolidado até o Dec. 59.081/2026 (legislacao.sefaz.rs.gov.br)",
    "dispositivo": "Apêndice II, Seção III, item V",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "rs-pneus-sem-st",
@@ -39,7 +43,9 @@
    "fonte": "RICMS/RS consolidado até o Dec. 59.081/2026; CONFAZ, Despacho 39/26",
    "dispositivo": "Dec. 58.937/26, Alteração 6857; denúncia do Conv. ICMS 102/17",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": true,
+   "versaoDaLinha": 2
   },
   {
    "id": "sc-autopecas-sem-st",
@@ -52,7 +58,9 @@
    "fonte": "RICMS/SC-01, Anexo 1-A (legislacao.sef.sc.gov.br)",
    "dispositivo": "Seção II revogada pelo Dec. 479/20, art. 3º",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": true,
+   "versaoDaLinha": 2
   },
   {
    "id": "sc-pneus-com-st",
@@ -65,7 +73,9 @@
    "fonte": "RICMS/SC-01, Anexo 1-A e Anexo 3 (legislacao.sef.sc.gov.br)",
    "dispositivo": "Anexo 1-A, Seção XVI; Anexo 3, arts. 53 a 55 (Conv. ICMS 102/17)",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "go-autopecas-sem-st",
@@ -78,7 +88,9 @@
    "fonte": "RCTE/GO, Anexo VIII (appasp.economia.go.gov.br)",
    "dispositivo": "Apêndice II, inciso XIII, excluído pelo Dec. 9.108",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": true,
+   "versaoDaLinha": 2
   },
   {
    "id": "go-pneus-com-st",
@@ -91,7 +103,9 @@
    "fonte": "RCTE/GO, Anexo VIII (appasp.economia.go.gov.br)",
    "dispositivo": "Apêndice II, inciso V, redação do Dec. 10.799/25 (Conv. ICMS 102/17)",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "rn-autopecas-sem-st",
@@ -101,10 +115,12 @@
    "vigenteAte": null,
    "comSt": false,
    "descricao": "Autopeças fora da ST (o segmento não está na lista do Anexo 007)",
-   "fonte": "RICMS/RN, Anexo 007 atualizado até o Dec. 36.041/2026 (sefaz.rn.gov.br)",
+   "fonte": "RICMS/RN, Anexo 007 atualizado até o Dec. 36.041/2026 (sefaz.rn.gov.br) — conclusão pela ausência do segmento na lista oficial",
    "dispositivo": "art. 2º, lista dos segmentos, redação do Dec. 33.028/23",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "rn-pneus-com-st",
@@ -117,7 +133,9 @@
    "fonte": "RICMS/RN, Anexo 007 atualizado até o Dec. 36.041/2026 (sefaz.rn.gov.br)",
    "dispositivo": "art. 2º, segmento 08 (código 16)",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "pe-autopecas-com-st",
@@ -130,7 +148,9 @@
    "fonte": "SEFAZ-PE, Produtos sujeitos à antecipação/ST com MVA, atualizada em 14/10/2026",
    "dispositivo": "Dec. 44.650/2017, Anexo 37, arts. 99 a 101",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "pe-pneus-com-st",
@@ -143,7 +163,9 @@
    "fonte": "SEFAZ-PE, Produtos sujeitos à antecipação/ST com MVA, atualizada em 14/10/2026",
    "dispositivo": "Dec. 44.650/2017, Anexo 37, arts. 49 a 54",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "ba-autopecas-com-st",
@@ -156,7 +178,9 @@
    "fonte": "RICMS/BA 2012, Anexo 1 vigente em 2026 (sefaz.ba.gov.br)",
    "dispositivo": "item 1.0",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "ba-pneus-com-st",
@@ -169,7 +193,9 @@
    "fonte": "RICMS/BA 2012, Anexo 1 vigente em 2026 (sefaz.ba.gov.br)",
    "dispositivo": "item 10.0",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "pr-autopecas-com-st",
@@ -182,7 +208,9 @@
    "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
    "dispositivo": "Anexo IX, Cap. I, Seção V, art. 28",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "pr-pneus-com-st",
@@ -195,7 +223,9 @@
    "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
    "dispositivo": "Anexo IX, Cap. I, Seção XXI, art. 116",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "es-autopecas-sem-st",
@@ -208,7 +238,9 @@
    "fonte": "RICMS/ES consolidado (PDF de 28/08/2026, sefaz.es.gov.br)",
    "dispositivo": "art. 236-E revogado pelo Dec. 5.078-R/22",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": true,
+   "versaoDaLinha": 2
   },
   {
    "id": "es-pneus-com-st",
@@ -221,7 +253,9 @@
    "fonte": "RICMS/ES consolidado (PDF de 28/08/2026, sefaz.es.gov.br)",
    "dispositivo": "art. 265, VII",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "pb-autopecas-com-st",
@@ -234,7 +268,9 @@
    "fonte": "RICMS/PB, Anexo 05 atualizado até o Dec. 46.791/2025 (sefaz.pb.gov.br)",
    "dispositivo": "Anexo 05, segmento CEST 01, redação do Dec. 44.681/23",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "pb-pneus-com-st",
@@ -247,7 +283,9 @@
    "fonte": "RICMS/PB, Anexo 05 atualizado até o Dec. 46.791/2025 (sefaz.pb.gov.br)",
    "dispositivo": "Anexo 05, segmento CEST 16, redação do Dec. 44.681/23",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "ms-autopecas-com-st",
@@ -260,7 +298,9 @@
    "fonte": "RICMS/MS, Anexo III, versão atual de 03/09/2026 (aacpdappls.net.ms.gov.br)",
    "dispositivo": "Subanexo I, Tabela II (Dec. 16.011/22); art. 48-D",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "ms-pneus-com-st",
@@ -273,7 +313,9 @@
    "fonte": "RICMS/MS, Anexo III, versão atual de 03/09/2026 (aacpdappls.net.ms.gov.br)",
    "dispositivo": "segmento 16, Dec. 15.674/2021",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "mt-autopecas-com-st",
@@ -283,10 +325,12 @@
    "vigenteAte": null,
    "comSt": true,
    "descricao": "Autopeças com ST (item residual 999.0)",
-   "fonte": "SEFAZ-MT, Informação nº 158/2026-UDCR/UNERC (31/08/2026)",
+   "fonte": "SEFAZ-MT, Informação nº 158/2026-UDCR/UNERC (31/08/2026) — orientação da SEFAZ, não é a norma (o texto do Anexo X não foi lido)",
    "dispositivo": "RICMS/MT, Anexo X, Apêndice, Tabela II (Dec. 271/2019)",
    "consultadaEm": "2026-11-25",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "rr-pneus-com-st",
@@ -299,7 +343,9 @@
    "fonte": "RICMS/RR, Dec. 4.335/01, atualizado até outubro de 2026 (sefaz.rr.gov.br)",
    "dispositivo": "arts. 782 a 784",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "ro-autopecas-com-st",
@@ -312,7 +358,9 @@
    "fonte": "RICMS/RO, Anexo VI consolidado até o Dec. 30.732/25 (sefin.ro.gov.br)",
    "dispositivo": "Parte 2, Tabela II, redação do Dec. 29.048/24",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "ro-pneus-auto-sem-st",
@@ -325,7 +373,9 @@
    "fonte": "RICMS/RO, Anexo VI consolidado até o Dec. 30.732/25 (sefin.ro.gov.br)",
    "dispositivo": "Tabela XVI, item 1.0 revogado pelo Dec. 28.385/23 (Conv. ICMS 106/23)",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": true,
+   "versaoDaLinha": 2
   },
   {
    "id": "ro-pneus-caminhao-sem-st",
@@ -338,7 +388,9 @@
    "fonte": "RICMS/RO, Anexo VI consolidado até o Dec. 30.732/25 (sefin.ro.gov.br)",
    "dispositivo": "Tabela XVI, item 2.0 revogado pelo Dec. 28.385/23 (Conv. ICMS 106/23)",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": true,
+   "versaoDaLinha": 2
   },
   {
    "id": "ro-pneus-moto-com-st",
@@ -351,7 +403,9 @@
    "fonte": "RICMS/RO, Anexo VI consolidado até o Dec. 30.732/25 (sefin.ro.gov.br)",
    "dispositivo": "Tabela XVI, item 3.0, redação do Dec. 29.048/24",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "ro-pneus-outros-sem-st",
@@ -364,7 +418,9 @@
    "fonte": "RICMS/RO, Anexo VI consolidado até o Dec. 30.732/25 (sefin.ro.gov.br)",
    "dispositivo": "Tabela XVI, item 4.0 revogado pelo Dec. 28.385/23 (Conv. ICMS 106/23)",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": true,
+   "versaoDaLinha": 2
   },
   {
    "id": "ro-pneus-bicicleta-com-st",
@@ -377,7 +433,9 @@
    "fonte": "RICMS/RO, Anexo VI consolidado até o Dec. 30.732/25 (sefin.ro.gov.br)",
    "dispositivo": "Tabela XVI, item 5.0, redação do Dec. 29.048/24",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "ro-protetores-sem-st",
@@ -390,7 +448,9 @@
    "fonte": "RICMS/RO, Anexo VI consolidado até o Dec. 30.732/25 (sefin.ro.gov.br)",
    "dispositivo": "Tabela XVI, item 7.0 revogado pelo Dec. 28.385/23 (Conv. ICMS 106/23)",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": true,
+   "versaoDaLinha": 2
   },
   {
    "id": "ro-protetores-bicicleta-com-st",
@@ -403,7 +463,9 @@
    "fonte": "RICMS/RO, Anexo VI consolidado até o Dec. 30.732/25 (sefin.ro.gov.br)",
    "dispositivo": "Tabela XVI, item 7.1, redação do Dec. 29.048/24",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   },
   {
    "id": "ro-camaras-sem-st",
@@ -416,7 +478,9 @@
    "fonte": "RICMS/RO, Anexo VI consolidado até o Dec. 30.732/25 (sefin.ro.gov.br)",
    "dispositivo": "Tabela XVI, item 8.0 revogado pelo Dec. 28.385/23 (Conv. ICMS 106/23)",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": true,
+   "versaoDaLinha": 2
   },
   {
    "id": "ro-camaras-bicicleta-com-st",
@@ -429,7 +493,174 @@
    "fonte": "RICMS/RO, Anexo VI consolidado até o Dec. 30.732/25 (sefin.ro.gov.br)",
    "dispositivo": "Tabela XVI, item 9.0, redação do Dec. 29.048/24",
    "consultadaEm": "2026-11-26",
-   "desdeVersao": 1
+   "desdeVersao": 1,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "pr-pneus-16006-sem-st",
+   "uf": "PR",
+   "cestInicio": "16006",
+   "vigenteDe": "2026-11-26",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus recauchutados (CEST 16.006.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
+   "dispositivo": "o art. 116 lista os CEST do segmento 16 sem o 16.006.00",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "sc-pneus-16006-sem-st",
+   "uf": "SC",
+   "cestInicio": "16006",
+   "vigenteDe": "2026-11-25",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus recauchutados (CEST 16.006.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/SC-01, Anexo 1-A e Anexo 3 (legislacao.sef.sc.gov.br)",
+   "dispositivo": "o Anexo 1-A, Seção XVI, lista os CEST do segmento 16 sem o 16.006.00",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "pb-pneus-16006-sem-st",
+   "uf": "PB",
+   "cestInicio": "16006",
+   "vigenteDe": "2024-01-01",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus recauchutados (CEST 16.006.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/PB, Anexo 05 atualizado até o Dec. 46.791/2025 (sefaz.pb.gov.br)",
+   "dispositivo": "o Anexo 05, segmento 16, lista os CEST sem o 16.006.00",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "ba-pneus-16006-sem-st",
+   "uf": "BA",
+   "cestInicio": "16006",
+   "vigenteDe": "2026-01-01",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus recauchutados (CEST 16.006.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/BA 2012, Anexo 1 vigente em 2026 (sefaz.ba.gov.br)",
+   "dispositivo": "o Anexo 1, item 10.0, lista os CEST do segmento 16 sem o 16.006.00",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "rn-pneus-16006-sem-st",
+   "uf": "RN",
+   "cestInicio": "16006",
+   "vigenteDe": "2023-11-01",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus recauchutados (CEST 16.006.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/RN, Anexo 007 atualizado até o Dec. 36.041/2026 (sefaz.rn.gov.br)",
+   "dispositivo": "o Anexo 007, segmento 08, lista os CEST do segmento 16 sem o 16.006.00",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "go-pneus-16005-sem-st",
+   "uf": "GO",
+   "cestInicio": "16005",
+   "vigenteDe": "2025-10-21",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus novos de bicicleta (CEST 16.005.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RCTE/GO, Anexo VIII (appasp.economia.go.gov.br)",
+   "dispositivo": "o Apêndice II, inciso V, lista os CEST do segmento 16 sem o 16.005.00, o 16.006.00 e o 16.009.00",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "go-pneus-16006-sem-st",
+   "uf": "GO",
+   "cestInicio": "16006",
+   "vigenteDe": "2025-10-21",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus recauchutados (CEST 16.006.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RCTE/GO, Anexo VIII (appasp.economia.go.gov.br)",
+   "dispositivo": "o Apêndice II, inciso V, lista os CEST do segmento 16 sem o 16.005.00, o 16.006.00 e o 16.009.00",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "go-pneus-16009-sem-st",
+   "uf": "GO",
+   "cestInicio": "16009",
+   "vigenteDe": "2025-10-21",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Câmaras de ar de bicicleta (CEST 16.009.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RCTE/GO, Anexo VIII (appasp.economia.go.gov.br)",
+   "dispositivo": "o Apêndice II, inciso V, lista os CEST do segmento 16 sem o 16.005.00, o 16.006.00 e o 16.009.00",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "rr-pneus-16005-sem-st",
+   "uf": "RR",
+   "cestInicio": "16005",
+   "vigenteDe": "2026-11-26",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus novos de bicicleta (CEST 16.005.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/RR, Dec. 4.335/01, atualizado até outubro de 2026 (sefaz.rr.gov.br)",
+   "dispositivo": "art. 782 (só as posições 40.11 e 40.13 e a subposição 4012.90: os recauchutados, 4012.1, ficam de fora) e art. 783, III (pneus e câmaras de bicicleta)",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "rr-pneus-16006-sem-st",
+   "uf": "RR",
+   "cestInicio": "16006",
+   "vigenteDe": "2026-11-26",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus recauchutados (CEST 16.006.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/RR, Dec. 4.335/01, atualizado até outubro de 2026 (sefaz.rr.gov.br)",
+   "dispositivo": "art. 782 (só as posições 40.11 e 40.13 e a subposição 4012.90: os recauchutados, 4012.1, ficam de fora) e art. 783, III (pneus e câmaras de bicicleta)",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
+  },
+  {
+   "id": "rr-pneus-16009-sem-st",
+   "uf": "RR",
+   "cestInicio": "16009",
+   "vigenteDe": "2026-11-26",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Câmaras de ar de bicicleta (CEST 16.009.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/RR, Dec. 4.335/01, atualizado até outubro de 2026 (sefaz.rr.gov.br)",
+   "dispositivo": "art. 782 (só as posições 40.11 e 40.13 e a subposição 4012.90: os recauchutados, 4012.1, ficam de fora) e art. 783, III (pneus e câmaras de bicicleta)",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 2,
+   "inicioInformado": false,
+   "versaoDaLinha": 2
   }
  ]
 }

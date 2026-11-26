@@ -48,12 +48,16 @@ pub fn estado(conn: &Connection, gerente: bool) -> Resultado<Estado> {
     Ok(Estado { ligado: ligado(conn)?, pode_mudar: gerente })
 }
 
-/// Liga o uso do A3 e a integração fiscal neste computador. `gerente`: quem está conectado é gerente. `senha`: a
-/// senha de um gerente, digitada agora. Devolve o nome do gerente que liberou.
-pub fn ligar(conn: &Connection, dispositivo: &str, usuario_id: &str, gerente: bool, senha: &str) -> Resultado<String> {
-    if !gerente {
-        return Err(Erro::validacao("Só um gerente liga o uso do certificado A3 e a integração fiscal."));
-    }
+/// Confere a senha de um gerente digitada agora, com a espera depois de 5 erros e o registro de cada erro (FIS-LIGA;
+/// também a troca para a produção, B1 da R1). Grava o erro **fora** da transação de quem chama (o erro tem de ficar
+/// registrado mesmo que o comando falhe): chame antes de abrir a transação. Devolve o nome do gerente.
+pub fn conferir_senha_do_gerente(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    senha: &str,
+    para_que: &str,
+) -> Resultado<String> {
     if let Some((quantidade, passou)) = usuarios::falhas(conn, BALDE_DO_GERENTE)? {
         if quantidade >= TENTATIVAS_MAXIMAS && passou < ESPERA_APOS_ERROS {
             let faltam = ESPERA_APOS_ERROS - passou;
@@ -64,7 +68,7 @@ pub fn ligar(conn: &Connection, dispositivo: &str, usuario_id: &str, gerente: bo
         }
     }
     if senha.is_empty() {
-        return Err(Erro::campo("senha", "Digite a senha do gerente para ligar."));
+        return Err(Erro::campo("senha", format!("Digite a senha do gerente para {para_que}.")));
     }
     let Some(g) = usuarios::conferir_gerente(conn, senha)? else {
         usuarios::anotar_falha(conn, BALDE_DO_GERENTE, ESPERA_APOS_ERROS)?;
@@ -75,24 +79,51 @@ pub fn ligar(conn: &Connection, dispositivo: &str, usuario_id: &str, gerente: bo
             "gerente.senha_errada",
             "usuario",
             usuario_id,
-            &["A senha do gerente digitada para ligar o fiscal estava errada".to_string()],
+            &[format!("A senha do gerente digitada para {para_que} estava errada")],
         )?;
         return Err(Erro::campo("senha", "Senha do gerente errada."));
     };
     usuarios::limpar_falhas(conn, BALDE_DO_GERENTE)?;
-    if !ligado(conn)? {
-        config::gravar(conn, CHAVE, "1")?;
+    Ok(g.nome)
+}
+
+/// Grava o "ligado" e o registro, juntos (C-M11 da R1: o atendente passa a transação; ou os dois, ou nenhum).
+/// `liberou`: o nome do gerente cuja senha foi conferida por [`conferir_senha_do_gerente`].
+pub fn gravar_ligado(
+    tx: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    gerente: bool,
+    liberou: &str,
+) -> Resultado<()> {
+    if !gerente {
+        return Err(Erro::validacao("Só um gerente liga o uso do certificado A3 e a integração fiscal."));
+    }
+    if !ligado(tx)? {
+        config::gravar(tx, CHAVE, "1")?;
         auditoria::registrar(
-            conn,
+            tx,
             dispositivo,
             Some(usuario_id),
             "fiscal.ligar",
             "config",
             CHAVE,
-            &[format!("{} ligou o uso do certificado A3 e a integração fiscal neste computador", g.nome)],
+            &[format!("{liberou} ligou o uso do certificado A3 e a integração fiscal neste computador")],
         )?;
     }
-    Ok(g.nome)
+    Ok(())
+}
+
+/// Liga o uso do A3 e a integração fiscal neste computador. `gerente`: quem está conectado é gerente. `senha`: a
+/// senha de um gerente, digitada agora. Devolve o nome do gerente que liberou. (O comando faz o mesmo, com a gravação
+/// numa transação.)
+pub fn ligar(conn: &Connection, dispositivo: &str, usuario_id: &str, gerente: bool, senha: &str) -> Resultado<String> {
+    if !gerente {
+        return Err(Erro::validacao("Só um gerente liga o uso do certificado A3 e a integração fiscal."));
+    }
+    let nome = conferir_senha_do_gerente(conn, dispositivo, usuario_id, senha, "ligar o fiscal")?;
+    gravar_ligado(conn, dispositivo, usuario_id, gerente, &nome)?;
+    Ok(nome)
 }
 
 /// Desliga neste computador. Qualquer gerente desliga, sem senha.
@@ -197,14 +228,26 @@ mod comandos {
         Ok(json!(super::estado(p.conn, p.gerente)?))
     }
 
+    /// C-M11 da R1: a senha é conferida antes (o erro fica registrado mesmo que o resto falhe); o "ligado" e o
+    /// registro vão numa transação só.
     fn fiscal_ligar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Senha = ler(dados)?;
-        let nome = super::ligar(p.conn, p.disp, p.usuario_id, p.gerente, &d.senha)?;
+        if !p.gerente {
+            return Err(crate::erro::Erro::validacao(
+                "Só um gerente liga o uso do certificado A3 e a integração fiscal.",
+            ));
+        }
+        let nome = super::conferir_senha_do_gerente(p.conn, p.disp, p.usuario_id, &d.senha, "ligar o fiscal")?;
+        let tx = p.conn.transaction()?;
+        super::gravar_ligado(&tx, p.disp, p.usuario_id, p.gerente, &nome)?;
+        tx.commit()?;
         Ok(json!({ "nome": nome, "estado": super::estado(p.conn, p.gerente)? }))
     }
 
     fn fiscal_desligar(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
-        super::desligar(p.conn, p.disp, p.usuario_id, p.gerente)?;
+        let tx = p.conn.transaction()?;
+        super::desligar(&tx, p.disp, p.usuario_id, p.gerente)?;
+        tx.commit()?;
         Ok(json!(super::estado(p.conn, p.gerente)?))
     }
 
@@ -357,5 +400,53 @@ mod testes {
             }
         }
         assert_eq!(achados, vec![("fiscal_porta.rs".to_string(), 1)], "{achados:?}");
+    }
+
+    /// C-M11 da R1: ligar e desligar gravam o seletor e o registro juntos. Se o registro falha, o seletor não muda (e o
+    /// gerente recebe o erro); a senha errada continua registrada.
+    #[test]
+    fn r1_cm11_ligar_e_desligar_sao_atomicos_com_o_registro() {
+        use serde_json::{json, Value};
+        let mut s = crate::Servico::em_memoria().unwrap();
+        let chamar = |s: &mut crate::Servico, cmd: &str, d: Value| -> Value {
+            serde_json::from_str(&s.chamar(cmd, &d.to_string())).unwrap()
+        };
+        let r = chamar(
+            &mut s,
+            "configurar_inicio",
+            json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        s.banco_para_teste()
+            .conn
+            .execute_batch(
+                "CREATE TEMP TRIGGER t_cm11 BEFORE INSERT ON auditoria WHEN NEW.acao LIKE 'fiscal.%'
+                 BEGIN SELECT RAISE(ABORT, 'o registro falhou'); END;",
+            )
+            .unwrap();
+        let r = chamar(&mut s, "fiscal_ligar", json!({ "senha": "12345678" }));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(!ligado(&s.banco_para_teste().conn).unwrap(), "o registro falhou: o seletor não pode ter ligado");
+        // A senha errada fica registrada mesmo assim (o registro dela não é 'fiscal.%').
+        let r = chamar(&mut s, "fiscal_ligar", json!({ "senha": "errada" }));
+        assert_eq!(r["ok"], false, "{r}");
+        let erradas: i64 = s
+            .banco_para_teste()
+            .conn
+            .query_row("SELECT COUNT(*) FROM auditoria WHERE acao = 'gerente.senha_errada'", [], |l| l.get(0))
+            .unwrap();
+        assert_eq!(erradas, 1);
+        // Desligar: com o registro falhando, continua ligado.
+        s.banco_para_teste().conn.execute_batch("DROP TRIGGER t_cm11;").unwrap();
+        assert_eq!(chamar(&mut s, "fiscal_ligar", json!({ "senha": "12345678" }))["ok"], true);
+        s.banco_para_teste()
+            .conn
+            .execute_batch(
+                "CREATE TEMP TRIGGER t_cm11 BEFORE INSERT ON auditoria WHEN NEW.acao LIKE 'fiscal.%'
+                 BEGIN SELECT RAISE(ABORT, 'o registro falhou'); END;",
+            )
+            .unwrap();
+        assert_eq!(chamar(&mut s, "fiscal_desligar", json!({}))["ok"], false);
+        assert!(ligado(&s.banco_para_teste().conn).unwrap(), "o registro falhou: o seletor não pode ter desligado");
     }
 }

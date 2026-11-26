@@ -109,7 +109,11 @@ FocusScope {
         return ({ vigente: "Valendo hoje", futura: "Vão valer", encerrada: "Encerradas" })[sit] || sit
     }
 
+    // F2-3 (b) da R1: sem o início na fonte, a data é a de quando a regra foi conferida valendo, e não "desde".
     function periodo(r) {
+        if (!r.inicioInformado)
+            return (r.vigenteAte ? "até " + r.vigenteAte + " (início não informado na fonte)"
+                                 : "valendo em " + r.vigenteDe + " (início não informado na fonte)")
         return (r.vigenteAte ? r.vigenteDe + " a " + r.vigenteAte : "desde " + r.vigenteDe)
     }
 
@@ -390,7 +394,9 @@ FocusScope {
                             Layout.fillWidth: true
                             wrapMode: Text.WordWrap
                         }
+                        // B4 da R1: o texto de São Paulo só na loja de SP.
                         Nota {
+                            visible: !!tela.dados && tela.dados.uf === "SP"
                             text: "Em São Paulo, autopeças (CEST 01) e pneus (CEST 16) saíram da substituição tributária em 01/10/2026 "
                                   + "(Portaria SRE 34/2026). Desde então a venda dentro do estado deixa de ser CSOSN 500 / CFOP 5405 e passa a ser "
                                   + "CSOSN 102 / CFOP 5102. Peças com o CSOSN fixado à mão (como vêm do sistema antigo) não mudam sozinhas."
@@ -407,6 +413,17 @@ FocusScope {
                             icone: "check"
                             onClicked: tela.corrigirTodas()
                         }
+                    }
+
+                    // C-M7 da R1: sem regra que decida e sem CSOSN escolhido à mão, o Rustinho não presume.
+                    Faixa {
+                        readonly property int n: tela.dados ? tela.dados.aDefinir.length : 0
+                        visible: n > 0
+                        titulo: "Peças com o CSOSN a definir"
+                        subtitulo: "sem regra de ST para elas (sem estado, sem CEST ou sem regra para o CEST): escolha com o contador"
+                        color: Tema.pergaminho
+                        Layout.fillWidth: true
+                        ListaPecas { pecas: tela.dados ? tela.dados.aDefinir : [] }
                     }
 
                     Faixa {
@@ -438,7 +455,10 @@ FocusScope {
                                   : tela.dados.monofasicas + (tela.dados.monofasicas === 1 ? " peça marcada" : " peças marcadas") + " como monofásica.")
                                   + " É uma informação do cadastro, não um erro: as vendas dessas peças saem separadas no relatório para o contador (PGDAS-D). "
                                   + "Nas compras pelo XML, peças novas com PIS CST 04 já vêm marcadas. "
-                                  + "O PIS/Cofins monofásico das autopeças e dos pneus vale até 31/12/2026 (Lei Complementar 214/2025, art. 542)."
+                                  // G5 da R1: depois de 31/12/2026 a marca deixa de valer (LC 214/2025, art. 542).
+                                  + (tela.dados && !tela.dados.monofasicoVale
+                                     ? "Desde 01/01/2027 o PIS/Cofins monofásico das autopeças e dos pneus acabou (Lei Complementar 214/2025, art. 542): a marca fica só como histórico. Confirme com o contador."
+                                     : "O PIS/Cofins monofásico das autopeças e dos pneus vale até 31/12/2026 (Lei Complementar 214/2025, art. 542).")
                             font.pixelSize: 14
                             Layout.fillWidth: true
                         }
@@ -469,6 +489,14 @@ FocusScope {
                             indice: Math.max(0, tela.ufs.indexOf(tela.ufRegras))
                             Layout.preferredWidth: 140
                             onEscolhido: tela.ufRegras = tela.ufs[indice]
+                        }
+                        // C-M6 da R1: a regra do programa que não entrou (a loja tem regra própria) não some em silêncio.
+                        Nota {
+                            visible: !!tela.dados && tela.dados.regrasPuladas.length > 0
+                            text: !tela.dados ? "" : "Regras que vêm com o programa e não entraram, porque a loja já tem regra própria no mesmo período: "
+                                                     + tela.dados.regrasPuladas.join("; ") + ". Confira com o contador qual vale."
+                            font.pixelSize: 14
+                            Layout.fillWidth: true
                         }
                         Nota {
                             visible: tela.regrasDaUf.length === 0

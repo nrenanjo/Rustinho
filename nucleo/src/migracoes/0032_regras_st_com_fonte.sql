@@ -12,24 +12,45 @@
 -- o banco (`fiscal::carregar_regras_do_programa`).
 --
 -- 100% aditiva sobre a estrutura 31: nada existente muda nem perde dados (as 4
--- regras de SP só ganham a fonte, e só se ninguém mexeu nelas); nenhum
--- registro é criado.
+-- regras de SP só ganham a fonte, e só se estão exatamente como a 0002 as
+-- criou); nenhum registro é criado.
 
 ALTER TABLE regra_st ADD COLUMN fonte TEXT NOT NULL DEFAULT '';
 ALTER TABLE regra_st ADD COLUMN dispositivo TEXT NOT NULL DEFAULT '';
 ALTER TABLE regra_st ADD COLUMN consultada_em TEXT NOT NULL DEFAULT '';
 ALTER TABLE regra_st ADD COLUMN origem TEXT NOT NULL DEFAULT 'loja';
+-- F2-3 (b) da R1: 1 = o início (vigente_de) é a data em que a regra começou, pela fonte; 0 = a fonte lida não
+-- informa o início, e vigente_de é a data em que a regra foi conferida valendo (ou a da redação lida). A tela não
+-- mostra a data 0 como se fosse legal.
+ALTER TABLE regra_st ADD COLUMN inicio_informado INTEGER NOT NULL DEFAULT 1;
 
--- As 4 de SP que vieram na 0002: a fonte, se ninguém mexeu nelas. Isto não é
--- alteração da loja (cada caixa faz o mesmo): não vai para o log da troca.
+-- As 4 de SP que vieram na 0002: a fonte, só se a linha está exatamente como a 0002 a criou (C-M5 da R1: a que o
+-- contador ou o gerente mudou fica da loja, sem fonte carimbada). Isto não é alteração da loja (cada caixa faz o
+-- mesmo): não vai para o log da troca. O início "2000-01-01" das regras com ST não tem fonte (o regime é anterior):
+-- fica como não informado.
 UPDATE sync_estado SET aplicando = 1 WHERE id = 1;
-UPDATE regra_st SET origem = 'rustinho', consultada_em = '2026-11-24',
+UPDATE regra_st SET origem = 'rustinho', consultada_em = '2026-11-24', inicio_informado = 0,
        fonte = 'Portaria SRE 34/2026 (SEFAZ-SP), legislacao.fazenda.sp.gov.br',
        dispositivo = 'revoga o Anexo XIV (autopeças) da Portaria CAT 68/2019, efeitos a partir de 01/10/2026'
- WHERE id IN ('sp-autopecas-com-st', 'sp-autopecas-sem-st');
-UPDATE regra_st SET origem = 'rustinho', consultada_em = '2026-11-24',
+ WHERE id = 'sp-autopecas-com-st' AND uf = 'SP' AND cest_inicio = '01' AND vigente_de = '2000-01-01'
+   AND vigente_ate = '2026-09-30' AND com_st = 1
+   AND descricao = 'Autopeças com ST (antigo Anexo XIV da Portaria CAT 68/2019)';
+UPDATE regra_st SET origem = 'rustinho', consultada_em = '2026-11-24', inicio_informado = 1,
+       fonte = 'Portaria SRE 34/2026 (SEFAZ-SP), legislacao.fazenda.sp.gov.br',
+       dispositivo = 'revoga o Anexo XIV (autopeças) da Portaria CAT 68/2019, efeitos a partir de 01/10/2026'
+ WHERE id = 'sp-autopecas-sem-st' AND uf = 'SP' AND cest_inicio = '01' AND vigente_de = '2026-10-01'
+   AND vigente_ate IS NULL AND com_st = 0
+   AND descricao = 'Autopeças fora da ST desde 01/10/2026 (Portaria SRE 34/2026)';
+UPDATE regra_st SET origem = 'rustinho', consultada_em = '2026-11-24', inicio_informado = 0,
        fonte = 'Portaria SRE 34/2026 (SEFAZ-SP), legislacao.fazenda.sp.gov.br',
        dispositivo = 'revoga o Anexo VII (pneus) da Portaria CAT 68/2019, efeitos a partir de 01/10/2026'
- WHERE id IN ('sp-pneus-com-st', 'sp-pneus-sem-st');
+ WHERE id = 'sp-pneus-com-st' AND uf = 'SP' AND cest_inicio = '16' AND vigente_de = '2000-01-01'
+   AND vigente_ate = '2026-09-30' AND com_st = 1 AND descricao = 'Pneus e câmaras com ST';
+UPDATE regra_st SET origem = 'rustinho', consultada_em = '2026-11-24', inicio_informado = 1,
+       fonte = 'Portaria SRE 34/2026 (SEFAZ-SP), legislacao.fazenda.sp.gov.br',
+       dispositivo = 'revoga o Anexo VII (pneus) da Portaria CAT 68/2019, efeitos a partir de 01/10/2026'
+ WHERE id = 'sp-pneus-sem-st' AND uf = 'SP' AND cest_inicio = '16' AND vigente_de = '2026-10-01'
+   AND vigente_ate IS NULL AND com_st = 0
+   AND descricao = 'Pneus e câmaras fora da ST desde 01/10/2026 (Portaria SRE 34/2026)';
 
 UPDATE sync_estado SET aplicando = 0 WHERE id = 1;

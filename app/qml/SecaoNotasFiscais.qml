@@ -7,8 +7,11 @@ import rustinho
 // notas emitidas pelo Rustinho neste computador e o detalhe de cada uma.
 // - O ambiente (homologação ou produção) fica sempre à vista.
 // - O certificado aparece em 4 estados: configurado, conectado, válido, testado.
-// - Os 4 indicadores filtram (sem repetir pílulas de situação); a pesquisa, o
-//   período e o tipo ficam simples, e "Limpar filtros" volta a tudo.
+// - Os 4 indicadores do texto A §12 (Autorizadas, Pendentes, Rejeitadas e
+//   Canceladas) filtram, sem repetir pílulas de situação; as sem resposta
+//   conclusiva têm um aviso à parte (pedem consulta). A pesquisa, o período
+//   (no dia deste computador) e o tipo ficam simples, e "Limpar filtros" volta
+//   a tudo.
 // - CPF e CNPJ ficam escondidos pelo olho ("Mostrar valores").
 // - O detalhe mostra primeiro a explicação humana; o código e a mensagem da
 //   SEFAZ vêm na íntegra, para copiar; "sem resposta" fica separado de
@@ -33,20 +36,15 @@ ColumnLayout {
     readonly property var modelos: ["NFC-e e NF-e", "Só NFC-e (modelo 65)", "Só NF-e (modelo 55)"]
     readonly property var indicadores: [
         { id: "autorizadas", nome: "Autorizadas" },
+        { id: "pendentes", nome: "Pendentes" },
         { id: "rejeitadas", nome: "Rejeitadas" },
-        { id: "desconhecidas", nome: "Sem resposta" },
-        { id: "pendentes", nome: "Pendentes" }
+        { id: "canceladas", nome: "Canceladas" }
     ]
-
-    function dia(deslocamento) {
-        const d = new Date()
-        d.setDate(d.getDate() + deslocamento)
-        return d.toISOString().slice(0, 10)
-    }
+    // B2 da R1: o período vai em dias; o núcleo conta no dia deste computador.
+    readonly property var diasDoPeriodo: [0, 1, 7, 30]
 
     function carregar() {
-        const de = periodo === 1 ? dia(0) : periodo === 2 ? dia(-6) : periodo === 3 ? dia(-29) : ""
-        const r = Api.chamar("nota_painel", { indicador: indicador, texto: texto, de: de, ate: "",
+        const r = Api.chamar("nota_painel", { indicador: indicador, texto: texto, dias: diasDoPeriodo[periodo],
                                               modelo: modelo === 1 ? 65 : modelo === 2 ? 55 : 0 })
         if (r.ok) {
             painel = r.dados.painel
@@ -105,9 +103,24 @@ ColumnLayout {
     }
 
     function nomeDoEstado(e) {
-        return ({ rascunho: "Rascunho", numerada: "Número reservado", enviada: "Enviada, sem resposta ainda",
+        return ({ rascunho: "Rascunho", enviada: "Enviada, sem resposta ainda",
                   autorizada: "Autorizada", rejeitada: "Rejeitada", denegada: "Denegada",
-                  desconhecida: "Sem resposta (consultar)", cancelada: "Cancelada", inutilizada: "Inutilizada" })[e] || e
+                  desconhecida: "Sem resposta (consultar)", nao_recebida: "Não chegou à SEFAZ",
+                  cancelada: "Cancelada", descartada: "Descartada" })[e] || e
+    }
+
+    function descartar() {
+        const id = detalhe.nota.id
+        const n = detalhe.nota.numero
+        janela.confirmar("Descartar esta nota?",
+                         n > 0 ? "Ela não chegou a valer na SEFAZ. O número " + n + " fica para a próxima nota."
+                               : "Ela ainda não foi transmitida.",
+                         "Descartar", () => janela.chamarGerente("nota_descartar", { id: id }, r => {
+                             if (r.ok) {
+                                 detalhe = r.dados
+                                 carregar()
+                             }
+                         }), "perigo")
     }
 
     function documento(doc) {
@@ -166,9 +179,10 @@ ColumnLayout {
             }
         }
         Text {
+            // B4 da R1: os 4 estados do certificado numa frase só, sem repetir "ainda não".
             text: "Certificado: "
                   + (secao.liga && secao.liga.ligado ? "liberado neste computador" : "desligado neste computador")
-                  + " · configurado: ainda não · conectado: ainda não · válido: ainda não · testado: ainda não"
+                  + ". Configurado, conectado, válido e testado: os quatro chegam junto com o emissor."
             textFormat: Text.PlainText
             color: Tema.tinta
             font.family: Tema.texto
@@ -191,6 +205,16 @@ ColumnLayout {
                         secao.carregar()
                     }
                 }
+            }
+        }
+        Botao {
+            visible: !!secao.painel && secao.painel.semResposta > 0
+            text: !secao.painel ? "" : (secao.painel.semResposta === 1 ? "1 nota sem resposta da SEFAZ: consultar"
+                                                                         : secao.painel.semResposta + " notas sem resposta da SEFAZ: consultar")
+            tipo: secao.indicador === "sem_resposta" ? "principal" : "secundario"
+            onClicked: {
+                secao.indicador = secao.indicador === "sem_resposta" ? "" : "sem_resposta"
+                secao.carregar()
             }
         }
         RowLayout {
@@ -409,6 +433,13 @@ ColumnLayout {
                             wrapMode: Text.WordWrap
                         }
                     }
+                }
+                Botao {
+                    visible: !!secao.detalhe && secao.detalhe.podeDescartar
+                    text: "Descartar esta nota"
+                    tipo: "perigo"
+                    Layout.topMargin: 8
+                    onClicked: secao.descartar()
                 }
             }
         }

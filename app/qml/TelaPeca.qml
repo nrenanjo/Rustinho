@@ -1446,8 +1446,11 @@ FocusScope {
                                     width: parent.width - 24
                                     spacing: 4
                                     Text {
-                                        text: tela.tributacao ? "Venda no estado: CSOSN " + tela.tributacao.csosn + " · CFOP " + tela.tributacao.cfop
-                                                                + (tela.tributacao.automatico ? "  (automático)" : "") : ""
+                                        // C-M7 da R1: sem regra, o CSOSN e o CFOP ficam a definir (o Rustinho não presume).
+                                        text: !tela.tributacao ? ""
+                                              : !tela.tributacao.decidido ? "Venda no estado: CSOSN e CFOP a definir (com o contador)"
+                                              : "Venda no estado: CSOSN " + tela.tributacao.csosn + " · CFOP " + tela.tributacao.cfop
+                                                + (tela.tributacao.automatico ? "  (automático)" : "")
                                         textFormat: Text.PlainText
                                         color: Tema.tinta
                                         font.family: Tema.texto

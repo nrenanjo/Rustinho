@@ -17,7 +17,7 @@ CREATE TABLE nota_fiscal (
     -- 55 = NF-e, 65 = NFC-e
     modelo             INTEGER NOT NULL CHECK (modelo IN (55, 65)),
     serie              INTEGER NOT NULL CHECK (serie BETWEEN 0 AND 999),
-    -- 0 enquanto rascunho (sem número reservado)
+    -- 0 até a transmissão (o número sai na hora de transmitir; a nota descartada volta a 0)
     numero             INTEGER NOT NULL DEFAULT 0,
     chave              TEXT NOT NULL DEFAULT '',
     estado             TEXT NOT NULL,

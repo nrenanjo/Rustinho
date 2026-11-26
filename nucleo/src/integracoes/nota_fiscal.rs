@@ -1,17 +1,25 @@
 //! A nota fiscal emitida pelo Rustinho (0.9.19, etapa 3, pacote E; FIS-P1 e FIS-P2): a máquina de estados, o painel
 //! e o detalhe.
 //!
-//! Estados: `rascunho` → `numerada` (número reservado) → `enviada` → `autorizada` | `rejeitada` | `denegada` |
-//! `desconhecida` → (`cancelada` | `inutilizada`, depois). A assinatura é do emissor (o ACBrMonitorPLUS assina com o
-//! A3): o Rustinho não guarda nem vê a chave privada.
+//! Estados: `rascunho` → `enviada` → `autorizada` | `rejeitada` | `denegada` | `desconhecida`; a consulta leva a
+//! `autorizada`, `denegada`, `cancelada` ou `nao_recebida`; o rascunho, a rejeitada e a não recebida podem ser
+//! `descartada`s. A assinatura é do emissor (o ACBrMonitorPLUS assina com o A3): o Rustinho não guarda nem vê a chave
+//! privada.
 //!
-//! Regras (FIS-P2 e o texto A §13 e §14):
+//! Regras (FIS-P2 e o texto A §13 e §14; R1 C-A1, C-M1 a C-M4):
 //! - **cada passo é gravado antes de chamar o emissor** (`marcar_enviada` numa transação confirmada antes da chamada),
 //!   e o resultado é gravado depois, em outra transação;
-//! - uma transmissão **sem resposta conclusiva** (a conexão caiu, o tempo acabou, a resposta é de outra nota) fica
-//!   `desconhecida`, separada de `rejeitada`, e **não se reenvia**: só a consulta tira a nota desse estado;
-//! - a rejeitada pode ser corrigida e transmitida de novo, à mão (mesmo número);
-//! - o número é por ambiente, modelo e série, e nunca se repete (índice único no banco);
+//! - **o número sai na hora de transmitir**, e não antes: não sobra número reservado e não usado (em AC, BA e SP não há
+//!   mais inutilização desde 01/11/2026, Ajustes SINIEF 38/26 e 40/26, e a quebra de sequência presume nota emitida em
+//!   contingência e não transmitida, Ajuste SINIEF 19/16, cl. 11ª, § 5º). O contador fica neste computador
+//!   (`config` local, que a restauração preserva): restaurar um backup antigo não faz o número voltar. O número da
+//!   rejeitada ou da não recebida que for descartada volta a ser usado (a SEFAZ não o registrou);
+//! - só uma resposta **conclusiva** muda a nota de vez (lista fechada do MOC 7.0, Anexo I, tabelas 4.4.1 e 4.4.2); o
+//!   resto (lote em processamento, serviço parado, duplicidade, erro não catalogado, código desconhecido, resposta sem
+//!   chave ou de outra nota) fica `desconhecida`, e **não se reenvia**: só a consulta tira a nota desse estado;
+//! - a resposta só vale para a nota que está esperando por ela (`enviada` ou `desconhecida`), e a chave de acesso tem
+//!   de ser desta nota (44 dígitos, o dígito verificador, o modelo, a série e o número); a autorizada pede o protocolo;
+//! - a nota só sai com o fiscal ligado neste computador e no ambiente em que foi criada;
 //! - toda conversa com o emissor passa pela porta do FIS-LIGA (`fiscal_porta::com_adaptador`).
 //!
 //! Nesta etapa não há emissor de verdade (o adaptador ACBr é a T008, com os dados do proprietário): a tela só lê.
@@ -23,14 +31,70 @@ use crate::erro::{Erro, Resultado};
 use crate::fiscal_porta::{NotaParaEnviar, RespostaSefaz};
 use crate::tempo;
 
-/// O que uma resposta conclusiva da SEFAZ quer dizer (MOC 7.0: 100 autorizado; 150 autorizado fora de prazo; 110,
-/// 301, 302 e 303 denegado; o resto é rejeição).
-pub fn estado_da_resposta(cstat: &str) -> &'static str {
-    match cstat.trim() {
-        "100" | "150" => "autorizada",
-        "110" | "301" | "302" | "303" => "denegada",
-        _ => "rejeitada",
+/// De onde veio a resposta da SEFAZ: a transmissão (autorização) ou a consulta da situação da nota.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origem {
+    Envio,
+    Consulta,
+}
+
+/// Os códigos de rejeição que **não** dizem que a nota ficou fora da SEFAZ (MOC 7.0, Anexo I, tabela 4.4.2): a
+/// duplicidade (204 e 539: a nota pode já estar autorizada), a nota já denegada na base (205), a chave diferente da
+/// existente (613), o consumo indevido (656: a SEFAZ nem olhou), o erro não catalogado (999) e o "NF-e não consta na
+/// base de dados" (217), que só tem sentido na consulta.
+const REJEICAO_NAO_CONCLUSIVA: &[&str] = &["204", "205", "217", "539", "613", "656", "999"];
+
+/// O que uma resposta da SEFAZ quer dizer para a nota (MOC 7.0, Anexo I, tabelas 4.4.1 e 4.4.2):
+/// - 100 e 150: autorizada; 110, 301, 302 e 303: denegada;
+/// - na consulta: 101, 151 e 155, cancelada; 217 ("NF-e não consta na base de dados da SEFAZ"), não recebida;
+/// - no envio: um código de rejeição (142, ou de 201 a 999, fora os de [`REJEICAO_NAO_CONCLUSIVA`]), rejeitada;
+/// - todo o resto (103, 104, 105 e 106 do lote, 108 e 109 do serviço parado, código fora da tabela) não é conclusivo:
+///   desconhecida.
+pub fn estado_da_resposta(origem: Origem, cstat: &str) -> &'static str {
+    let c = cstat.trim();
+    match c {
+        "100" | "150" => return "autorizada",
+        "110" | "301" | "302" | "303" => return "denegada",
+        "101" | "151" | "155" if origem == Origem::Consulta => return "cancelada",
+        "217" if origem == Origem::Consulta => return "nao_recebida",
+        _ => {}
     }
+    let numero: Option<u32> = if c.len() == 3 && c.bytes().all(|b| b.is_ascii_digit()) { c.parse().ok() } else { None };
+    let rejeicao =
+        numero.is_some_and(|n| n == 142 || (201..=999).contains(&n)) && !REJEICAO_NAO_CONCLUSIVA.contains(&c);
+    if origem == Origem::Envio && rejeicao {
+        "rejeitada"
+    } else {
+        "desconhecida"
+    }
+}
+
+/// O dígito verificador da chave de acesso (módulo 11, pesos de 2 a 9 da direita para a esquerda; MOC 7.0, 5.4).
+fn digito_da_chave(corpo: &[u8]) -> u8 {
+    let mut soma = 0u32;
+    for (i, b) in corpo.iter().rev().enumerate() {
+        soma += u32::from(b - b'0') * (2 + (i as u32 % 8));
+    }
+    let resto = soma % 11;
+    if resto < 2 {
+        0
+    } else {
+        (11 - resto) as u8
+    }
+}
+
+/// A chave de acesso confere com esta nota? 44 dígitos, o dígito verificador, e o modelo (posições 21–22), a série
+/// (23–25) e o número (26–34) da nota (MOC 7.0, Anexo I, campo B03 e item 5.4).
+pub fn chave_e_desta_nota(chave: &str, modelo: i64, serie: i64, numero: i64) -> bool {
+    let b = chave.trim().as_bytes();
+    if b.len() != 44 || !b.iter().all(u8::is_ascii_digit) {
+        return false;
+    }
+    let campo = |de: usize, ate: usize| std::str::from_utf8(&b[de..ate]).ok().and_then(|t| t.parse::<i64>().ok());
+    digito_da_chave(&b[..43]) == b[43] - b'0'
+        && campo(20, 22) == Some(modelo)
+        && campo(22, 25) == Some(serie)
+        && campo(25, 34) == Some(numero)
 }
 
 fn evento(
@@ -98,21 +162,103 @@ pub fn criar_rascunho(
     Ok(id)
 }
 
-/// Reserva o próximo número da série (por ambiente e modelo). Só do rascunho.
-pub fn reservar_numero(tx: &Connection, usuario_id: &str, id: &str) -> Resultado<i64> {
-    let e = estado(tx, id)?;
-    if e != "rascunho" {
-        return Err(Erro::validacao("Só o rascunho recebe número."));
+/// A chave do contador deste computador (o último número usado) e a do piso (a última nota que o sistema de antes
+/// emitiu nessa série, achada pela descoberta ou informada). As duas ficam fora de `CONFIG_DA_LOJA`: só deste
+/// computador, preservadas na restauração.
+pub fn chave_do_contador(ambiente: i64, modelo: i64, serie: i64) -> String {
+    format!("fiscal_numero:{ambiente}:{modelo}:{serie}")
+}
+pub fn chave_do_piso(ambiente: i64, modelo: i64, serie: i64) -> String {
+    format!("fiscal_ultimo_de_antes:{ambiente}:{modelo}:{serie}")
+}
+fn chave_dos_livres(ambiente: i64, modelo: i64, serie: i64) -> String {
+    format!("fiscal_numeros_livres:{ambiente}:{modelo}:{serie}")
+}
+
+fn ler_numero(tx: &Connection, chave: &str) -> Resultado<i64> {
+    Ok(crate::config::ler(tx, chave)?.and_then(|v| v.trim().parse().ok()).unwrap_or(0))
+}
+
+fn ler_livres(tx: &Connection, chave: &str) -> Resultado<Vec<i64>> {
+    let mut v: Vec<i64> = crate::config::ler(tx, chave)?
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|t| t.trim().parse().ok())
+        .filter(|n: &i64| *n > 0)
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    Ok(v)
+}
+
+fn gravar_livres(tx: &Connection, chave: &str, v: &[i64]) -> Resultado<()> {
+    crate::config::gravar(tx, chave, &v.iter().map(i64::to_string).collect::<Vec<_>>().join(","))
+}
+
+/// C-M4 da R1: a chave (que viaja para todos os caixas) do computador que emite na série.
+pub fn chave_da_estacao(modelo: i64, serie: i64) -> String {
+    format!("{}{modelo}:{serie}", crate::sync::PREFIXO_ESTACAO_FISCAL)
+}
+
+/// O computador que emite na série: (dispositivo, nome do caixa), se já há um.
+pub fn estacao_da_serie(conn: &Connection, modelo: i64, serie: i64) -> Resultado<Option<(String, String)>> {
+    Ok(crate::config::ler(conn, &chave_da_estacao(modelo, serie))?
+        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok())
+        .and_then(|v| Some((v["dispositivo"].as_str()?.to_string(), v["nome"].as_str().unwrap_or("").to_string()))))
+}
+
+/// C-M4 da R1: a série passa a ser deste computador. Recusa a série que já é de outro (dois computadores na mesma
+/// série repetiriam números). O nome do caixa vai junto, para a mensagem.
+pub fn reservar_serie(tx: &Connection, dispositivo: &str, modelo: i64, serie: i64) -> Resultado<()> {
+    if let Some((outro, nome)) = estacao_da_serie(tx, modelo, serie)? {
+        if outro != dispositivo {
+            let quem =
+                if nome.trim().is_empty() { "outro computador da loja".to_string() } else { format!("o caixa {nome}") };
+            return Err(Erro::validacao(format!(
+                "A série {serie} da {} já é usada por {quem}. Dois computadores na mesma série repetiriam o número da nota: use outra série (combine com o contador).",
+                if modelo == 65 { "NFC-e" } else { "NF-e" }
+            )));
+        }
+        return Ok(());
     }
-    let numero: i64 = tx.query_row(
-        "SELECT COALESCE(MAX(n.numero), 0) + 1 FROM nota_fiscal n, nota_fiscal x
-          WHERE x.id = ?1 AND n.ambiente = x.ambiente AND n.modelo = x.modelo AND n.serie = x.serie",
-        [id],
+    let nome = crate::config::nome_caixa(tx)?;
+    crate::config::gravar(
+        tx,
+        &chave_da_estacao(modelo, serie),
+        &serde_json::json!({ "dispositivo": dispositivo, "nome": nome }).to_string(),
+    )
+}
+
+/// O número da próxima nota da série: primeiro um número devolvido por uma nota descartada (a SEFAZ não o registrou);
+/// senão, um depois do maior entre o contador deste computador, o piso e as notas da tabela.
+fn proximo_numero(tx: &Connection, ambiente: i64, modelo: i64, serie: i64) -> Resultado<i64> {
+    let chave_livres = chave_dos_livres(ambiente, modelo, serie);
+    let mut livres = ler_livres(tx, &chave_livres)?;
+    while !livres.is_empty() {
+        let n = livres.remove(0);
+        let usado: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM nota_fiscal WHERE ambiente = ?1 AND modelo = ?2 AND serie = ?3 AND numero = ?4)",
+            params![ambiente, modelo, serie, n],
+            |l| l.get(0),
+        )?;
+        if !usado {
+            gravar_livres(tx, &chave_livres, &livres)?;
+            return Ok(n);
+        }
+    }
+    gravar_livres(tx, &chave_livres, &livres)?;
+    let da_tabela: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(numero), 0) FROM nota_fiscal WHERE ambiente = ?1 AND modelo = ?2 AND serie = ?3",
+        params![ambiente, modelo, serie],
         |l| l.get(0),
     )?;
-    tx.execute("UPDATE nota_fiscal SET numero = ?2 WHERE id = ?1", params![id, numero])?;
-    mudar(tx, id, &e, "numerada", &format!("Número {numero} reservado"), Some(usuario_id))?;
-    Ok(numero)
+    let contador = chave_do_contador(ambiente, modelo, serie);
+    let n = ler_numero(tx, &contador)?.max(ler_numero(tx, &chave_do_piso(ambiente, modelo, serie))?).max(da_tabela) + 1;
+    if n > 999_999_999 {
+        return Err(Erro::validacao("A numeração desta série chegou ao fim (999.999.999). Use outra série."));
+    }
+    crate::config::gravar(tx, &contador, &n.to_string())?;
+    Ok(n)
 }
 
 /// Os dados que o emissor recebe.
@@ -139,55 +285,148 @@ pub fn para_enviar(tx: &Connection, id: &str) -> Resultado<NotaParaEnviar> {
     .ok_or_else(|| Erro::NaoEncontrado("Nota fiscal".into()))
 }
 
-/// Grava "enviada" **antes** de chamar o emissor. Só a numerada ou a rejeitada (corrigida, à mão) se transmitem;
-/// a enviada e a desconhecida não: consulte antes.
+/// O texto de quando o Rustinho não sabe se a SEFAZ recebeu a nota.
+pub const TEXTO_CONSULTE_ANTES: &str =
+    "O Rustinho não sabe se a SEFAZ recebeu esta nota. Não transmita de novo: consulte na SEFAZ primeiro.";
+
+/// Grava "enviada" **antes** de chamar o emissor, e dá o número à nota que ainda não tem. Só o rascunho, a rejeitada
+/// (corrigida, à mão, com o mesmo número) e a não recebida se transmitem; a enviada e a desconhecida não: consulte
+/// antes.
 pub fn marcar_enviada(tx: &Connection, usuario_id: &str, id: &str) -> Resultado<()> {
     let e = estado(tx, id)?;
     match e.as_str() {
-        "numerada" | "rejeitada" => mudar(tx, id, &e, "enviada", "Transmissão começou", Some(usuario_id)),
-        "enviada" | "desconhecida" => Err(Erro::validacao(
-            "O Rustinho não sabe se a SEFAZ recebeu esta nota. Não transmita de novo: consulte na SEFAZ primeiro.",
-        )),
-        _ => Err(Erro::validacao(format!("Uma nota {e} não se transmite."))),
+        "rascunho" | "rejeitada" | "nao_recebida" => {}
+        "enviada" | "desconhecida" => return Err(Erro::validacao(TEXTO_CONSULTE_ANTES)),
+        _ => return Err(Erro::validacao(format!("Uma nota {} não se transmite.", nome_do_estado(&e)))),
     }
+    let (ambiente, modelo, serie, numero): (i64, i64, i64, i64) =
+        tx.query_row("SELECT ambiente, modelo, serie, numero FROM nota_fiscal WHERE id = ?1", [id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
+        })?;
+    // C-M4 da R1: a série é deste computador (a primeira nota a reserva; a de outro computador, não sai daqui).
+    let eu = crate::config::ler(tx, "dispositivo_id")?.unwrap_or_default();
+    reservar_serie(tx, &eu, modelo, serie)?;
+    let detalhe = if numero == 0 {
+        let n = proximo_numero(tx, ambiente, modelo, serie)?;
+        tx.execute("UPDATE nota_fiscal SET numero = ?2 WHERE id = ?1", params![id, n])?;
+        format!("Transmissão começou, com o número {n}")
+    } else {
+        "Transmissão começou".to_string()
+    };
+    mudar(tx, id, &e, "enviada", &detalhe, Some(usuario_id))
 }
 
-/// Grava o resultado de uma transmissão ou de uma consulta. `resposta`: `Ok` com a resposta da SEFAZ, ou `Err` com
-/// o que aconteceu (sem resposta conclusiva). A resposta de outra nota (outra chave) também é desconhecida.
+/// Descarta a nota que não chegou à SEFAZ (o rascunho, a rejeitada e a não recebida). O número dela, se tinha, volta a
+/// ser usado pela próxima nota da série: a SEFAZ não o registrou.
+pub fn descartar(tx: &Connection, usuario_id: &str, id: &str) -> Resultado<()> {
+    let e = estado(tx, id)?;
+    if !matches!(e.as_str(), "rascunho" | "rejeitada" | "nao_recebida") {
+        return Err(Erro::validacao(if matches!(e.as_str(), "enviada" | "desconhecida") {
+            TEXTO_CONSULTE_ANTES.to_string()
+        } else {
+            format!("Uma nota {} não se descarta.", nome_do_estado(&e))
+        }));
+    }
+    let (ambiente, modelo, serie, numero): (i64, i64, i64, i64) =
+        tx.query_row("SELECT ambiente, modelo, serie, numero FROM nota_fiscal WHERE id = ?1", [id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
+        })?;
+    let detalhe = if numero > 0 {
+        let chave = chave_dos_livres(ambiente, modelo, serie);
+        let mut livres = ler_livres(tx, &chave)?;
+        livres.push(numero);
+        gravar_livres(tx, &chave, &livres)?;
+        tx.execute("UPDATE nota_fiscal SET numero = 0, chave = '' WHERE id = ?1", [id])?;
+        format!("Nota descartada; o número {numero} volta para a próxima nota")
+    } else {
+        "Nota descartada".to_string()
+    };
+    mudar(tx, id, &e, "descartada", &detalhe, Some(usuario_id))
+}
+
+/// Grava o resultado de uma transmissão (`Origem::Envio`) ou de uma consulta (`Origem::Consulta`). `resposta`: `Ok`
+/// com a resposta da SEFAZ, ou `Err` com o que aconteceu (sem resposta conclusiva). Só a nota que espera uma resposta
+/// (`enviada`, e na consulta também a `desconhecida`) a recebe.
 pub fn registrar_resposta(
     tx: &Connection,
     usuario_id: &str,
     id: &str,
+    origem: Origem,
     resposta: Result<&RespostaSefaz, &str>,
 ) -> Resultado<String> {
     let e = estado(tx, id)?;
-    let chave_antes: String = tx.query_row("SELECT chave FROM nota_fiscal WHERE id = ?1", [id], |l| l.get(0))?;
-    let para = match resposta {
-        Err(o_que) => {
-            mudar(tx, id, &e, "desconhecida", &format!("Sem resposta conclusiva: {o_que}"), Some(usuario_id))?;
-            return Ok("desconhecida".into());
-        }
-        Ok(r)
-            if r.cstat.trim().is_empty()
-                || (!chave_antes.is_empty() && !r.chave.is_empty() && r.chave != chave_antes) =>
-        {
-            let o_que =
-                if r.cstat.trim().is_empty() { "resposta sem cStat" } else { "resposta de outra nota (outra chave)" };
-            mudar(tx, id, &e, "desconhecida", &format!("Sem resposta conclusiva: {o_que}"), Some(usuario_id))?;
-            return Ok("desconhecida".into());
-        }
+    let espera = match origem {
+        Origem::Envio => e == "enviada",
+        Origem::Consulta => matches!(e.as_str(), "enviada" | "desconhecida"),
+    };
+    if !espera {
+        return Err(Erro::validacao(format!(
+            "Esta nota está {} e não espera resposta da SEFAZ: a resposta não foi gravada.",
+            nome_do_estado(&e)
+        )));
+    }
+    let (modelo, serie, numero, chave_antes): (i64, i64, i64, String) =
+        tx.query_row("SELECT modelo, serie, numero, chave FROM nota_fiscal WHERE id = ?1", [id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
+        })?;
+    let desconhecida = |o_que: &str| -> Resultado<String> {
+        mudar(tx, id, &e, "desconhecida", &format!("Sem resposta conclusiva: {o_que}"), Some(usuario_id))?;
+        Ok("desconhecida".into())
+    };
+    let r = match resposta {
+        Err(o_que) => return desconhecida(o_que),
         Ok(r) => r,
     };
-    let novo = estado_da_resposta(&para.cstat);
+    let cstat = r.cstat.trim();
+    if cstat.is_empty() {
+        return desconhecida("resposta sem cStat");
+    }
+    let novo = estado_da_resposta(origem, cstat);
+    let chave = r.chave.trim();
+    // A rejeição e a "não consta" não criam a nota na SEFAZ: a chave pode faltar; se vier, tem de ser desta nota.
+    let pede_chave = !matches!(novo, "rejeitada" | "nao_recebida");
+    if (pede_chave || !chave.is_empty()) && novo != "desconhecida" {
+        if !chave_e_desta_nota(chave, modelo, serie, numero) {
+            return desconhecida(&format!("{cstat} - {}; a chave de acesso não é desta nota", r.motivo.trim()));
+        }
+        if !chave_antes.is_empty() && chave != chave_antes {
+            return desconhecida(&format!("{cstat} - {}; resposta de outra nota (outra chave)", r.motivo.trim()));
+        }
+    }
+    if novo == "autorizada" && r.protocolo.trim().is_empty() {
+        return desconhecida(&format!("{cstat} - {}; a autorização veio sem o protocolo", r.motivo.trim()));
+    }
+    // A nota que não entrou na SEFAZ não guarda chave: a correção pode trazer outra (outro código numérico).
+    let guarda_chave = matches!(novo, "autorizada" | "denegada" | "cancelada");
     tx.execute(
-        "UPDATE nota_fiscal SET cstat = ?2, motivo = ?3, protocolo = CASE WHEN ?4 <> '' THEN ?4 ELSE protocolo END,
-                                chave = CASE WHEN chave = '' THEN ?5 ELSE chave END,
+        "UPDATE nota_fiscal SET cstat = ?2, motivo = ?3,
+                                protocolo = CASE WHEN ?4 <> '' THEN ?4 ELSE protocolo END,
+                                chave = CASE WHEN ?7 THEN CASE WHEN chave = '' THEN ?5 ELSE chave END ELSE '' END,
                                 xml_nome = CASE WHEN ?6 <> '' THEN ?6 ELSE xml_nome END
           WHERE id = ?1",
-        params![id, para.cstat.trim(), para.motivo, para.protocolo, para.chave, para.xml_nome],
+        params![id, cstat, r.motivo, r.protocolo.trim(), chave, r.xml_nome, guarda_chave],
     )?;
-    mudar(tx, id, &e, novo, &format!("{} - {}", para.cstat.trim(), para.motivo), Some(usuario_id))?;
+    if novo == "desconhecida" {
+        return desconhecida(&format!("{cstat} - {}", r.motivo.trim()));
+    }
+    mudar(tx, id, &e, novo, &format!("{cstat} - {}", r.motivo), Some(usuario_id))?;
     Ok(novo.into())
+}
+
+/// O nome do estado para as mensagens.
+pub fn nome_do_estado(e: &str) -> &str {
+    match e {
+        "rascunho" => "em rascunho",
+        "enviada" => "enviada, esperando a resposta",
+        "autorizada" => "autorizada",
+        "rejeitada" => "rejeitada",
+        "denegada" => "denegada",
+        "desconhecida" => "sem resposta conclusiva",
+        "nao_recebida" => "não recebida pela SEFAZ",
+        "cancelada" => "cancelada",
+        "descartada" => "descartada",
+        outro => outro,
+    }
 }
 
 // ------------------------------------------------------------------ painel (FIS-P1) e detalhe (FIS-P2)
@@ -211,11 +450,15 @@ pub struct NotaResumo {
 pub struct Painel {
     /// 1 = produção, 2 = homologação: sempre à vista.
     pub ambiente: i64,
+    /// Os quatro indicadores do texto A §12 (R1 C-M9).
     pub autorizadas: i64,
-    pub rejeitadas: i64,
-    pub desconhecidas: i64,
-    /// Rascunho, numerada ou enviada.
+    /// Rascunho, enviada, sem resposta conclusiva e não recebida.
     pub pendentes: i64,
+    /// Rejeitada e denegada.
+    pub rejeitadas: i64,
+    pub canceladas: i64,
+    /// Das pendentes, as que pedem consulta na SEFAZ antes de qualquer coisa (aviso à parte, sem ser indicador).
+    pub sem_resposta: i64,
     pub notas: Vec<NotaResumo>,
     pub total: i64,
 }
@@ -228,25 +471,30 @@ pub fn ambiente(conn: &Connection) -> Resultado<i64> {
         .unwrap_or(2))
 }
 
-/// Os filtros do painel. `indicador`: "autorizadas", "rejeitadas", "desconhecidas", "pendentes" ou vazio (todas).
+/// Os filtros do painel. `indicador`: "autorizadas", "pendentes", "rejeitadas", "canceladas", "sem_resposta" ou vazio
+/// (todas).
 #[derive(Debug, Default, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Filtros {
     pub indicador: String,
     pub texto: String,
-    /// "AAAA-MM-DD"
+    /// "AAAA-MM-DD", no dia deste computador.
     pub de: String,
     pub ate: String,
+    /// B2 da R1: o período em dias até hoje, contados no dia deste computador (1 = hoje; 7 = os últimos 7 dias). Vence
+    /// o `de`. A tela manda os dias, e não a data: a data em UTC errava depois das 21h.
     /// 0 = os dois; 55 ou 65.
     pub modelo: i64,
+    pub dias: i64,
 }
 
 fn estados_do_indicador(indicador: &str) -> &'static [&'static str] {
     match indicador {
         "autorizadas" => &["autorizada"],
+        "pendentes" => &["rascunho", "enviada", "desconhecida", "nao_recebida"],
         "rejeitadas" => &["rejeitada", "denegada"],
-        "desconhecidas" => &["desconhecida"],
-        "pendentes" => &["rascunho", "numerada", "enviada"],
+        "canceladas" => &["cancelada"],
+        "sem_resposta" => &["enviada", "desconhecida"],
         _ => &[],
     }
 }
@@ -268,15 +516,22 @@ pub fn painel(conn: &Connection, f: &Filtros) -> Resultado<Painel> {
         format!(" AND estado IN ({})", estados.iter().map(|e| format!("'{e}'")).collect::<Vec<_>>().join(", "))
     };
     let texto = format!("%{}%", f.texto.trim());
-    let de = if f.de.trim().is_empty() { "0000-00-00".to_string() } else { f.de.trim().to_string() };
+    let de = if f.dias > 0 {
+        conn.query_row("SELECT date('now', 'localtime', ?1)", [format!("-{} days", f.dias - 1)], |l| l.get(0))?
+    } else if f.de.trim().is_empty() {
+        "0000-00-00".to_string()
+    } else {
+        f.de.trim().to_string()
+    };
     let ate = if f.ate.trim().is_empty() { "9999-12-31".to_string() } else { f.ate.trim().to_string() };
     let mut c = conn.prepare(&format!(
         "SELECT id, modelo, serie, numero, estado, destinatario_doc, destinatario_nome, valor, criado_em
            FROM nota_fiscal
           WHERE ambiente = ?1{filtro_estado}
             AND (?2 = 0 OR modelo = ?2)
-            AND substr(criado_em, 1, 10) BETWEEN ?3 AND ?4
-            AND (CAST(numero AS TEXT) LIKE ?5 OR destinatario_nome LIKE ?5 OR destinatario_doc LIKE ?5 OR chave LIKE ?5)
+            AND date(criado_em, 'localtime') BETWEEN ?3 AND ?4
+            AND estado <> 'descartada'
+            AND (CAST(numero AS TEXT) LIKE ?5 OR destinatario_nome LIKE ?5 OR chave LIKE ?5)
           ORDER BY criado_em DESC, numero DESC"
     ))?;
     let notas: Vec<NotaResumo> = c
@@ -297,9 +552,10 @@ pub fn painel(conn: &Connection, f: &Filtros) -> Resultado<Painel> {
     Ok(Painel {
         ambiente: amb,
         autorizadas: conta(estados_do_indicador("autorizadas"))?,
-        rejeitadas: conta(estados_do_indicador("rejeitadas"))?,
-        desconhecidas: conta(estados_do_indicador("desconhecidas"))?,
         pendentes: conta(estados_do_indicador("pendentes"))?,
+        rejeitadas: conta(estados_do_indicador("rejeitadas"))?,
+        canceladas: conta(estados_do_indicador("canceladas"))?,
+        sem_resposta: conta(estados_do_indicador("sem_resposta"))?,
         total: notas.len() as i64,
         notas,
     })
@@ -329,21 +585,25 @@ pub struct Detalhe {
     pub explicacao: String,
     /// Só a desconhecida (e a enviada que ficou sem volta) pedem consulta; nenhuma se reenvia sozinha.
     pub pede_consulta: bool,
+    /// O rascunho, a rejeitada e a não recebida se transmitem (a rejeitada depois de corrigida).
+    pub pode_transmitir: bool,
+    /// O rascunho, a rejeitada e a não recebida se descartam (o número volta).
+    pub pode_descartar: bool,
     pub eventos: Vec<Evento>,
 }
 
 /// A explicação humana do estado (FIS-P2: primeiro ela; o código vem depois).
 pub fn explicacao(estado: &str) -> &'static str {
     match estado {
-        "rascunho" => "Esta nota ainda não tem número nem foi transmitida.",
-        "numerada" => "O número desta nota está reservado. Ela ainda não foi transmitida.",
-        "enviada" => "A transmissão começou e a resposta ainda não chegou.",
+        "rascunho" => "Esta nota ainda não foi transmitida. O número sai na hora de transmitir.",
+        "enviada" => "A transmissão começou e a resposta ainda não chegou. Não transmita de novo: consulte na SEFAZ.",
         "autorizada" => "A SEFAZ autorizou esta nota.",
-        "rejeitada" => "A SEFAZ recusou esta nota. Veja o motivo abaixo, corrija e transmita de novo.",
+        "rejeitada" => "A SEFAZ recusou esta nota. Veja o motivo abaixo e corrija. Ela pode ser transmitida de novo, com o mesmo número, ou descartada.",
         "denegada" => "A SEFAZ denegou esta nota (problema no cadastro do emitente ou do destinatário). O número não pode ser usado de novo.",
-        "desconhecida" => "O Rustinho não sabe se a SEFAZ recebeu esta nota: a conexão caiu ou a resposta não veio. Não transmita de novo: consulte na SEFAZ primeiro.",
+        "desconhecida" => "O Rustinho não sabe se a SEFAZ recebeu esta nota: a resposta não veio ou não foi conclusiva. Não transmita de novo: consulte na SEFAZ primeiro.",
+        "nao_recebida" => "A SEFAZ informou que esta nota não chegou lá. Ela pode ser transmitida de novo ou descartada.",
         "cancelada" => "Esta nota foi cancelada.",
-        "inutilizada" => "Este número foi inutilizado.",
+        "descartada" => "Esta nota foi descartada antes de chegar à SEFAZ.",
         _ => "",
     }
 }
@@ -386,7 +646,10 @@ pub fn detalhe(conn: &Connection, id: &str) -> Resultado<Detalhe> {
         .query_map([id], |l| Ok(Evento { quando: l.get(0)?, de: l.get(1)?, para: l.get(2)?, detalhe: l.get(3)? }))?
         .collect::<Result<_, _>>()?;
     let pede_consulta = matches!(nota.estado.as_str(), "desconhecida" | "enviada");
+    let livre = matches!(nota.estado.as_str(), "rascunho" | "rejeitada" | "nao_recebida");
     Ok(Detalhe {
+        pode_transmitir: livre,
+        pode_descartar: livre,
         explicacao: explicacao(&nota.estado).to_string(),
         nota,
         ambiente,
@@ -409,6 +672,11 @@ pub fn detalhe(conn: &Connection, id: &str) -> Resultado<Detalhe> {
 /// - nenhuma nota do ambiente atual pode estar sem resposta conclusiva ou no meio do caminho (consultar antes).
 pub fn impedimentos_da_troca(conn: &Connection) -> Resultado<Vec<String>> {
     let mut v = Vec::new();
+    // B7 da R1: voltar para a homologação não pede certificado, série nem credenciamento; só as notas no meio do caminho.
+    if ambiente(conn)? == 1 {
+        notas_no_meio(conn, &mut v)?;
+        return Ok(v);
+    }
     if !crate::fiscal_porta::ligado(conn)? {
         v.push("O uso do certificado A3 está desligado neste computador.".to_string());
     } else if !crate::config::ligado(conn, "fiscal_certificado_testado")? {
@@ -422,9 +690,15 @@ pub fn impedimentos_da_troca(conn: &Connection) -> Resultado<Vec<String>> {
     if !crate::config::ligado(conn, "fiscal_credenciado")? {
         v.push("O credenciamento da loja na SEFAZ ainda não foi confirmado.".to_string());
     }
+    notas_no_meio(conn, &mut v)?;
+    Ok(v)
+}
+
+/// As notas do ambiente atual que podem estar na SEFAZ sem o Rustinho saber (consultar antes de trocar).
+fn notas_no_meio(conn: &Connection, v: &mut Vec<String>) -> Resultado<()> {
     let atual = ambiente(conn)?;
     let soltas: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM nota_fiscal WHERE ambiente = ?1 AND estado IN ('numerada', 'enviada', 'desconhecida')",
+        "SELECT COUNT(*) FROM nota_fiscal WHERE ambiente = ?1 AND estado IN ('enviada', 'desconhecida')",
         [atual],
         |l| l.get(0),
     )?;
@@ -434,7 +708,7 @@ pub fn impedimentos_da_troca(conn: &Connection) -> Resultado<Vec<String>> {
             if soltas == 1 { "nota" } else { "notas" }
         ));
     }
-    Ok(v)
+    Ok(())
 }
 
 fn nome_do_ambiente(a: i64) -> &'static str {
@@ -445,9 +719,31 @@ fn nome_do_ambiente(a: i64) -> &'static str {
     }
 }
 
+/// O que se confere antes de pedir a senha (o bloqueio não gasta tentativa de senha, e a senha nunca o contorna).
+pub fn conferir_antes_da_senha(conn: &Connection, gerente: bool, para: i64, confirmacao: &str) -> Resultado<()> {
+    if !gerente {
+        return Err(Erro::validacao("Só um gerente troca o ambiente fiscal."));
+    }
+    if !matches!(para, 1 | 2) {
+        return Err(Erro::validacao("Ambiente fiscal inválido."));
+    }
+    if ambiente(conn)? == para {
+        return Ok(());
+    }
+    let impedimentos = impedimentos_da_troca(conn)?;
+    if !impedimentos.is_empty() {
+        return Err(Erro::validacao(format!("Ainda não dá para trocar: {}", impedimentos.join(" "))));
+    }
+    if para == 1 && confirmacao.trim() != "PRODUÇÃO" {
+        return Err(Erro::campo("confirmacao", "Para ir para a produção, digite PRODUÇÃO."));
+    }
+    Ok(())
+}
+
 /// Troca o ambiente fiscal deste computador. Só o gerente, só sem impedimento; ir para a produção pede digitar
-/// PRODUÇÃO e a senha de um gerente (texto A §14: digitar PRODUÇÃO e a senha nunca contornam um bloqueio). O
-/// registro diz quem, quando e de qual para qual.
+/// PRODUÇÃO e a senha de um gerente (texto A §14: digitar PRODUÇÃO e a senha nunca contornam um bloqueio). A senha é
+/// conferida antes, por `fiscal_porta::conferir_senha_do_gerente` (com a espera e o registro do erro, B1 da R1):
+/// `liberou` é o nome do gerente. O registro diz quem, quando e de qual para qual.
 pub fn trocar_ambiente(
     tx: &Connection,
     dispositivo: &str,
@@ -455,29 +751,15 @@ pub fn trocar_ambiente(
     gerente: bool,
     para: i64,
     confirmacao: &str,
-    senha: &str,
+    liberou: Option<&str>,
 ) -> Resultado<i64> {
-    if !gerente {
-        return Err(Erro::validacao("Só um gerente troca o ambiente fiscal."));
-    }
-    if !matches!(para, 1 | 2) {
-        return Err(Erro::validacao("Ambiente fiscal inválido."));
-    }
+    conferir_antes_da_senha(tx, gerente, para, confirmacao)?;
     let de = ambiente(tx)?;
     if de == para {
         return Ok(para);
     }
-    let impedimentos = impedimentos_da_troca(tx)?;
-    if !impedimentos.is_empty() {
-        return Err(Erro::validacao(format!("Ainda não dá para trocar: {}", impedimentos.join(" "))));
-    }
-    if para == 1 {
-        if confirmacao.trim() != "PRODUÇÃO" {
-            return Err(Erro::campo("confirmacao", "Para ir para a produção, digite PRODUÇÃO."));
-        }
-        if crate::usuarios::conferir_gerente(tx, senha)?.is_none() {
-            return Err(Erro::campo("senha", "Senha do gerente errada."));
-        }
+    if para == 1 && liberou.is_none_or(|n| n.trim().is_empty()) {
+        return Err(Erro::campo("senha", "Digite a senha do gerente para ir para a produção."));
     }
     crate::config::gravar(tx, "fiscal_ambiente", &para.to_string())?;
     let nome = crate::usuarios::buscar(tx, usuario_id).map(|u| u.nome).unwrap_or_default();
@@ -495,6 +777,32 @@ pub fn trocar_ambiente(
         )],
     )?;
     Ok(para)
+}
+
+/// C-M2 e C-M3 da R1: antes de gravar qualquer coisa, a nota só fala com a SEFAZ com o fiscal ligado neste computador
+/// e no ambiente em que foi criada. Recusa sem mudar a nota (nada saiu do computador).
+pub fn pode_falar_com_a_sefaz(conn: &Connection, id: &str) -> Resultado<()> {
+    if !crate::fiscal_porta::ligado(conn)? {
+        return Err(Erro::validacao(
+            "O fiscal está desligado neste computador: nada foi enviado à SEFAZ. Um gerente liga em Configurações › Fiscal.",
+        ));
+    }
+    let da_nota: i64 = tx_ambiente(conn, id)?;
+    let agora = ambiente(conn)?;
+    if da_nota != agora {
+        return Err(Erro::validacao(format!(
+            "Esta nota é da {} e o computador está na {}: nada foi enviado à SEFAZ.",
+            nome_do_ambiente(da_nota),
+            nome_do_ambiente(agora)
+        )));
+    }
+    Ok(())
+}
+
+fn tx_ambiente(conn: &Connection, id: &str) -> Resultado<i64> {
+    conn.query_row("SELECT ambiente FROM nota_fiscal WHERE id = ?1", [id], |l| l.get(0))
+        .optional()?
+        .ok_or_else(|| Erro::NaoEncontrado("Nota fiscal".into()))
 }
 
 // ------------------------------------------------------------- comandos das telas e a transmissão
@@ -517,7 +825,17 @@ pub(crate) mod comandos {
         // FIS-P3: os impedimentos (só lê) e a troca (a função confere o gerente, a confirmação e a senha).
         Comando { nome: "fiscal_ambiente_impedimentos", classe: Classe::Leitura, funcao: fiscal_ambiente_impedimentos },
         Comando { nome: "fiscal_ambiente_trocar", classe: Classe::Caixa, funcao: fiscal_ambiente_trocar },
+        // F2-2/C-M4: a nota que não chegou à SEFAZ (rascunho, rejeitada, não recebida) se descarta; o número volta.
+        Comando { nome: "nota_descartar", classe: Classe::Gerente("configuracoes"), funcao: nota_descartar },
     ];
+
+    fn nota_descartar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        super::descartar(&tx, p.usuario_id, &d.id)?;
+        tx.commit()?;
+        Ok(json!(super::detalhe(p.conn, &d.id)?))
+    }
 
     fn fiscal_ambiente_impedimentos(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
         Ok(json!({ "ambiente": super::ambiente(p.conn)?, "impedimentos": super::impedimentos_da_troca(p.conn)? }))
@@ -525,8 +843,15 @@ pub(crate) mod comandos {
 
     fn fiscal_ambiente_trocar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Troca = ler(dados)?;
+        super::conferir_antes_da_senha(p.conn, p.gerente, d.para, &d.confirmacao)?;
+        let liberou = if d.para == 1 && super::ambiente(p.conn)? != 1 {
+            Some(fiscal_porta::conferir_senha_do_gerente(p.conn, p.disp, p.usuario_id, &d.senha, "ir para a produção")?)
+        } else {
+            None
+        };
         let tx = p.conn.transaction()?;
-        let novo = super::trocar_ambiente(&tx, p.disp, p.usuario_id, p.gerente, d.para, &d.confirmacao, &d.senha)?;
+        let novo =
+            super::trocar_ambiente(&tx, p.disp, p.usuario_id, p.gerente, d.para, &d.confirmacao, liberou.as_deref())?;
         tx.commit()?;
         Ok(json!({ "ambiente": novo }))
     }
@@ -564,6 +889,7 @@ pub(crate) mod comandos {
     ) -> Resultado<String> {
         let nota = {
             let tx = conn.transaction()?;
+            super::pode_falar_com_a_sefaz(&tx, id)?;
             super::marcar_enviada(&tx, usuario_id, id)?;
             let n = super::para_enviar(&tx, id)?;
             tx.commit()?;
@@ -572,8 +898,8 @@ pub(crate) mod comandos {
         let resposta = fiscal_porta::com_adaptador(conn, adaptador, |a, l| a.enviar(l, &nota));
         let tx = conn.transaction()?;
         let novo = match &resposta {
-            Ok(r) => super::registrar_resposta(&tx, usuario_id, id, Ok(r))?,
-            Err(e) => super::registrar_resposta(&tx, usuario_id, id, Err(&e.to_string()))?,
+            Ok(r) => super::registrar_resposta(&tx, usuario_id, id, super::Origem::Envio, Ok(r))?,
+            Err(e) => super::registrar_resposta(&tx, usuario_id, id, super::Origem::Envio, Err(&e.to_string()))?,
         };
         tx.commit()?;
         Ok(novo)
@@ -593,11 +919,12 @@ pub(crate) mod comandos {
         if !matches!(e.as_str(), "enviada" | "desconhecida") {
             return Err(crate::erro::Erro::validacao("Só a nota sem resposta conclusiva precisa de consulta."));
         }
+        super::pode_falar_com_a_sefaz(conn, id)?;
         let resposta = fiscal_porta::com_adaptador(conn, adaptador, |a, l| a.consultar(l, &nota));
         let tx = conn.transaction()?;
         let novo = match &resposta {
-            Ok(r) => super::registrar_resposta(&tx, usuario_id, id, Ok(r))?,
-            Err(e) => super::registrar_resposta(&tx, usuario_id, id, Err(&e.to_string()))?,
+            Ok(r) => super::registrar_resposta(&tx, usuario_id, id, super::Origem::Consulta, Ok(r))?,
+            Err(e) => super::registrar_resposta(&tx, usuario_id, id, super::Origem::Consulta, Err(&e.to_string()))?,
         };
         tx.commit()?;
         Ok(novo)
@@ -611,22 +938,67 @@ mod testes {
     use crate::banco::Banco;
     use crate::fiscal_porta::{Adaptador, Licenca};
 
-    /// O emissor falso: devolve as respostas da fila, na ordem; `None` é "sem resposta" (a conexão caiu).
+    /// A chave de acesso de uma nota de teste (SP, 11/2026, CNPJ fixo, emissão normal), com o dígito verificador.
+    fn chave(modelo: i64, serie: i64, numero: i64, codigo: u32) -> String {
+        let corpo = format!("35261111222333000181{modelo:02}{serie:03}{numero:09}1{codigo:08}");
+        format!("{corpo}{}", digito_da_chave(corpo.as_bytes()))
+    }
+
+    /// Qual chave a resposta falsa traz.
+    #[derive(Clone, Copy)]
+    enum Chave {
+        Desta,
+        DestaOutroCodigo,
+        Vazia,
+        DeOutroNumero,
+        DigitoErrado,
+    }
+
+    /// Uma fala do emissor falso: `None` é "sem resposta" (a conexão caiu).
+    type Fala = Option<(&'static str, Chave, bool)>;
+
+    fn ok(cstat: &'static str) -> Fala {
+        Some((cstat, Chave::Desta, true))
+    }
+
+    /// O emissor falso: responde na ordem da fila, montando a chave pela nota que recebeu.
     struct Falso {
-        respostas: Vec<Option<RespostaSefaz>>,
+        falas: Vec<Fala>,
         enviadas: Vec<NotaParaEnviar>,
         consultas: u32,
     }
 
     impl Falso {
-        fn com(respostas: Vec<Option<RespostaSefaz>>) -> Falso {
-            Falso { respostas, enviadas: Vec::new(), consultas: 0 }
+        fn com(falas: Vec<Fala>) -> Falso {
+            Falso { falas, enviadas: Vec::new(), consultas: 0 }
         }
-        fn proxima(&mut self) -> Resultado<RespostaSefaz> {
-            match self.respostas.remove(0) {
-                Some(r) => Ok(r),
-                None => Err(Erro::Interno("a conexão com o emissor caiu".into())),
-            }
+        fn proxima(&mut self, nota: &NotaParaEnviar) -> Resultado<RespostaSefaz> {
+            let Some((cstat, qual, com_protocolo)) = self.falas.remove(0) else {
+                return Err(Erro::Interno("a conexão com o emissor caiu".into()));
+            };
+            let c = match qual {
+                Chave::Desta => chave(nota.modelo, nota.serie, nota.numero, 1),
+                Chave::DestaOutroCodigo => chave(nota.modelo, nota.serie, nota.numero, 2),
+                Chave::Vazia => String::new(),
+                Chave::DeOutroNumero => chave(nota.modelo, nota.serie, nota.numero + 1, 1),
+                Chave::DigitoErrado => {
+                    let mut c = chave(nota.modelo, nota.serie, nota.numero, 1);
+                    let d = (c.pop().unwrap() as u8 - b'0' + 1) % 10;
+                    c.push((b'0' + d) as char);
+                    c
+                }
+            };
+            Ok(RespostaSefaz {
+                chave: c,
+                cstat: cstat.into(),
+                motivo: format!("Motivo {cstat}"),
+                protocolo: if com_protocolo && matches!(cstat, "100" | "150" | "110" | "101") {
+                    "135260000000001".into()
+                } else {
+                    String::new()
+                },
+                xml_nome: String::new(),
+            })
         }
     }
 
@@ -636,22 +1008,12 @@ mod testes {
         }
         fn enviar(&mut self, _l: &Licenca, nota: &NotaParaEnviar) -> Resultado<RespostaSefaz> {
             self.enviadas.push(nota.clone());
-            self.proxima()
+            self.proxima(nota)
         }
-        fn consultar(&mut self, _l: &Licenca, _nota: &NotaParaEnviar) -> Resultado<RespostaSefaz> {
+        fn consultar(&mut self, _l: &Licenca, nota: &NotaParaEnviar) -> Resultado<RespostaSefaz> {
             self.consultas += 1;
-            self.proxima()
+            self.proxima(nota)
         }
-    }
-
-    fn sefaz(cstat: &str, motivo: &str) -> Option<RespostaSefaz> {
-        Some(RespostaSefaz {
-            chave: "35261111222333000181650010000000011000000019".into(),
-            cstat: cstat.into(),
-            motivo: motivo.into(),
-            protocolo: if cstat == "100" { "135260000000001".into() } else { String::new() },
-            xml_nome: "35261111222333000181650010000000011000000019-nfe.xml".into(),
-        })
     }
 
     /// Um banco com o fiscal ligado e um gerente.
@@ -664,75 +1026,149 @@ mod testes {
     }
 
     fn nova(b: &Banco, u: &str) -> String {
-        let id = criar_rascunho(&b.conn, &b.dispositivo, u, 2, 65, 1, None, 15000, "", "").unwrap();
-        reservar_numero(&b.conn, u, &id).unwrap();
-        id
+        criar_rascunho(&b.conn, &b.dispositivo, u, 2, 65, 1, None, 15000, "", "").unwrap()
+    }
+
+    fn numero(b: &Banco, id: &str) -> i64 {
+        para_enviar(&b.conn, id).unwrap().numero
+    }
+
+    fn situacao(b: &Banco, id: &str) -> String {
+        estado(&b.conn, id).unwrap()
+    }
+
+    /// C-A1 da R1: a lista fechada do MOC 7.0, Anexo I (tabelas 4.4.1 e 4.4.2). Só conclui o que é conclusivo; o
+    /// resto é "sem resposta conclusiva" e não libera o reenvio.
+    #[test]
+    fn r1_ca1_lista_fechada_dos_codigos() {
+        use Origem::{Consulta, Envio};
+        for (o, c, e) in [
+            (Envio, "100", "autorizada"),
+            (Envio, "150", "autorizada"),
+            (Envio, "110", "denegada"),
+            (Envio, "301", "denegada"),
+            (Envio, "302", "denegada"),
+            (Envio, "303", "denegada"),
+            (Envio, "225", "rejeitada"),
+            (Envio, "142", "rejeitada"),
+            (Envio, "383", "rejeitada"),
+            (Consulta, "100", "autorizada"),
+            (Consulta, "110", "denegada"),
+            (Consulta, "101", "cancelada"),
+            (Consulta, "151", "cancelada"),
+            (Consulta, "155", "cancelada"),
+            (Consulta, "217", "nao_recebida"),
+        ] {
+            assert_eq!(estado_da_resposta(o, c), e, "{o:?} {c}");
+        }
+        for c in [
+            "103", "104", "105", "106", "107", "108", "109", "124", "135", "204", "205", "539", "613", "656", "999",
+            "000", "099", "1000", "abc", "", " ",
+        ] {
+            assert_eq!(estado_da_resposta(Envio, c), "desconhecida", "envio {c:?}");
+        }
+        // Na consulta, o código de rejeição é do pedido de consulta, e não da nota; e o cancelamento só vem da consulta.
+        for c in ["225", "236", "105", "108", "999"] {
+            assert_eq!(estado_da_resposta(Consulta, c), "desconhecida", "consulta {c}");
+        }
+        for c in ["101", "151", "155", "217"] {
+            assert_eq!(estado_da_resposta(Envio, c), "desconhecida", "envio {c}");
+        }
+    }
+
+    /// C-A1: a resposta não conclusiva (lote em processamento, serviço parado, duplicidade) fica "desconhecida", não
+    /// se transmite de novo e não se descarta; a consulta resolve.
+    #[test]
+    fn r1_ca1_nao_conclusiva_nao_libera_reenvio() {
+        for cstat in ["103", "105", "108", "109", "204", "539", "999"] {
+            let (mut b, u) = banco();
+            let id = nova(&b, &u);
+            let mut falso = Falso::com(vec![ok(cstat)]);
+            assert_eq!(transmitir(&mut b.conn, &u, &mut falso, &id).unwrap(), "desconhecida", "{cstat}");
+            let mut outro = Falso::com(vec![ok("100")]);
+            assert!(transmitir(&mut b.conn, &u, &mut outro, &id).is_err(), "{cstat}: não reenvia");
+            assert!(outro.enviadas.is_empty());
+            assert!(descartar(&b.conn, &u, &id).is_err(), "{cstat}: não se descarta");
+            assert_eq!(consultar(&mut b.conn, &u, &mut outro, &id).unwrap(), "autorizada", "{cstat}");
+        }
     }
 
     #[test]
-    fn pacote_e_autorizada_e_rejeitada_e_denegada() {
+    fn pacote_e_autorizada_rejeitada_e_reenvio_da_rejeitada() {
         let (mut b, u) = banco();
-        let mut falso = Falso::com(vec![
-            sefaz("100", "Autorizado o uso da NF-e"),
-            sefaz("225", "Rejeição: Falha no Schema XML do lote de NFe"),
-        ]);
+        let mut falso = Falso::com(vec![ok("100"), Some(("225", Chave::Desta, false))]);
         let a = nova(&b, &u);
         assert_eq!(transmitir(&mut b.conn, &u, &mut falso, &a).unwrap(), "autorizada");
         let r = nova(&b, &u);
         assert_eq!(transmitir(&mut b.conn, &u, &mut falso, &r).unwrap(), "rejeitada");
         let d = detalhe(&b.conn, &r).unwrap();
-        assert_eq!(
-            (d.cstat.as_str(), d.motivo.as_str()),
-            ("225", "Rejeição: Falha no Schema XML do lote de NFe"),
-            "na íntegra"
-        );
+        assert_eq!((d.cstat.as_str(), d.motivo.as_str()), ("225", "Motivo 225"), "na íntegra");
         assert!(d.explicacao.contains("recusou"));
-        assert!(!d.pede_consulta);
-        assert_eq!(estado_da_resposta("150"), "autorizada");
-        assert_eq!(estado_da_resposta("302"), "denegada");
-        // A rejeitada se transmite de novo, à mão, com o mesmo número.
-        let mut falso2 = Falso::com(vec![sefaz("100", "Autorizado o uso da NF-e")]);
+        assert!(!d.pede_consulta && d.pode_transmitir && d.pode_descartar);
+        assert_eq!(d.chave, "", "a rejeitada não guarda chave");
+        // C-M1: a correção vem com outro código numérico (outra chave da mesma nota) e é autorizada, com o mesmo número.
+        let mut falso2 = Falso::com(vec![Some(("100", Chave::DestaOutroCodigo, true))]);
         assert_eq!(transmitir(&mut b.conn, &u, &mut falso2, &r).unwrap(), "autorizada");
         assert_eq!(falso2.enviadas[0].numero, 2);
+        assert_eq!(detalhe(&b.conn, &r).unwrap().chave, chave(65, 1, 2, 2));
     }
 
-    /// FIS-P2: sem resposta conclusiva não é rejeição, e não se reenvia; só a consulta resolve.
+    /// C-M1 da R1: a resposta só vale para a nota que espera por ela, com a chave desta nota, e a autorização pede o
+    /// protocolo.
     #[test]
-    fn pacote_e_sem_resposta_fica_desconhecida_e_nao_reenvia() {
+    fn r1_cm1_resposta_tem_de_ser_desta_nota() {
+        for (qual, protocolo, o_que) in [
+            (Chave::Vazia, true, "sem chave"),
+            (Chave::DeOutroNumero, true, "chave de outro número"),
+            (Chave::DigitoErrado, true, "dígito verificador errado"),
+            (Chave::Desta, false, "sem protocolo"),
+        ] {
+            let (mut b, u) = banco();
+            let id = nova(&b, &u);
+            let mut falso = Falso::com(vec![Some(("100", qual, protocolo))]);
+            assert_eq!(transmitir(&mut b.conn, &u, &mut falso, &id).unwrap(), "desconhecida", "{o_que}");
+            assert_eq!(detalhe(&b.conn, &id).unwrap().chave, "", "{o_que}: nada gravado como chave");
+        }
+        // A autorizada não volta atrás com uma resposta tardia (nem de envio nem de consulta).
+        let (mut b, u) = banco();
+        let id = nova(&b, &u);
+        transmitir(&mut b.conn, &u, &mut Falso::com(vec![ok("100")]), &id).unwrap();
+        let tardia = RespostaSefaz { cstat: "225".into(), ..Default::default() };
+        assert!(registrar_resposta(&b.conn, &u, &id, Origem::Envio, Ok(&tardia)).is_err());
+        assert!(registrar_resposta(&b.conn, &u, &id, Origem::Consulta, Ok(&tardia)).is_err());
+        assert!(registrar_resposta(&b.conn, &u, &id, Origem::Envio, Err("caiu")).is_err());
+        assert_eq!(situacao(&b, &id), "autorizada");
+        // O rascunho não recebe resposta.
+        let r = nova(&b, &u);
+        assert!(registrar_resposta(&b.conn, &u, &r, Origem::Envio, Ok(&tardia)).is_err());
+        assert_eq!(situacao(&b, &r), "rascunho");
+        let _ = &mut b;
+    }
+
+    /// FIS-P2: sem resposta não é rejeição, e não se reenvia; só a consulta resolve. A consulta que diz "não consta"
+    /// (217) libera o reenvio.
+    #[test]
+    fn pacote_e_sem_resposta_fica_desconhecida_e_a_consulta_resolve() {
         let (mut b, u) = banco();
         let id = nova(&b, &u);
         let mut falso = Falso::com(vec![None]);
         assert_eq!(transmitir(&mut b.conn, &u, &mut falso, &id).unwrap(), "desconhecida");
         let d = detalhe(&b.conn, &id).unwrap();
-        assert_eq!(d.nota.estado, "desconhecida");
-        assert!(d.pede_consulta);
+        assert!(d.pede_consulta && !d.pode_transmitir && !d.pode_descartar);
         assert!(d.explicacao.contains("Não transmita de novo"));
-        // Transmitir de novo é recusado, e o emissor não é chamado.
-        let mut outro = Falso::com(vec![sefaz("100", "Autorizado o uso da NF-e")]);
-        assert!(transmitir(&mut b.conn, &u, &mut outro, &id).is_err());
-        assert!(outro.enviadas.is_empty());
-        // A consulta resolve.
-        assert_eq!(consultar(&mut b.conn, &u, &mut outro, &id).unwrap(), "autorizada");
-        assert_eq!(outro.consultas, 1);
+        let mut outro = Falso::com(vec![Some(("217", Chave::Vazia, false)), ok("100")]);
+        assert_eq!(consultar(&mut b.conn, &u, &mut outro, &id).unwrap(), "nao_recebida");
+        assert!(detalhe(&b.conn, &id).unwrap().pode_transmitir);
+        assert_eq!(transmitir(&mut b.conn, &u, &mut outro, &id).unwrap(), "autorizada");
+        assert_eq!(outro.enviadas[0].numero, 1, "o mesmo número");
     }
 
-    /// A resposta de outra nota (outra chave) não vale: fica desconhecida.
-    #[test]
-    fn pacote_e_resposta_de_outra_nota_fica_desconhecida() {
-        let (mut b, u) = banco();
-        let id = nova(&b, &u);
-        let mut falso = Falso::com(vec![None, sefaz("100", "Autorizado")]);
-        transmitir(&mut b.conn, &u, &mut falso, &id).unwrap();
-        b.conn.execute("UPDATE nota_fiscal SET chave = 'chave-desta' WHERE id = ?1", [&id]).unwrap();
-        assert_eq!(consultar(&mut b.conn, &u, &mut falso, &id).unwrap(), "desconhecida");
-    }
-
-    /// "Enviada" é gravada antes de chamar o emissor: se o programa cair durante a chamada, a nota não volta a
-    /// "numerada" (e não se transmite de novo às cegas).
+    /// "Enviada" é gravada antes de chamar o emissor: se o programa cair durante a chamada, a nota não volta atrás (e
+    /// não se transmite de novo às cegas). O número já está nela.
     #[test]
     fn pacote_e_enviada_e_gravada_antes_da_chamada() {
         struct Espiao {
-            visto: Option<String>,
+            visto: Option<(String, i64)>,
             caminho: std::path::PathBuf,
         }
         impl Adaptador for Espiao {
@@ -742,7 +1178,11 @@ mod testes {
             fn enviar(&mut self, _l: &Licenca, nota: &NotaParaEnviar) -> Resultado<RespostaSefaz> {
                 // Outra conexão, como outro processo: o estado já tem de estar confirmado no disco.
                 let c = Connection::open(&self.caminho).unwrap();
-                self.visto = c.query_row("SELECT estado FROM nota_fiscal WHERE id = ?1", [&nota.id], |l| l.get(0)).ok();
+                self.visto = c
+                    .query_row("SELECT estado, numero FROM nota_fiscal WHERE id = ?1", [&nota.id], |l| {
+                        Ok((l.get(0)?, l.get(1)?))
+                    })
+                    .ok();
                 Err(Erro::Interno("caiu".into()))
             }
             fn consultar(&mut self, _l: &Licenca, _nota: &NotaParaEnviar) -> Resultado<RespostaSefaz> {
@@ -759,45 +1199,131 @@ mod testes {
         let id = nova(&b, &u);
         let mut espiao = Espiao { visto: None, caminho: caminho.clone() };
         assert_eq!(transmitir(&mut b.conn, &u, &mut espiao, &id).unwrap(), "desconhecida");
-        assert_eq!(espiao.visto.as_deref(), Some("enviada"));
+        assert_eq!(espiao.visto, Some(("enviada".to_string(), 1)));
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
     }
 
-    /// O número é por ambiente, modelo e série, e nunca se repete.
+    /// F2-2 + C-M4 da R1: o número sai na hora de transmitir (o rascunho não tem), é por ambiente, modelo e série, nunca
+    /// se repete, respeita o piso (a última nota do sistema de antes) e não volta com um backup antigo (o contador é
+    /// deste computador). O número da rejeitada descartada volta; o da denegada, não.
     #[test]
-    fn pacote_e_numero_por_ambiente_modelo_e_serie() {
-        let (b, u) = banco();
-        let a = nova(&b, &u);
-        let n = nova(&b, &u);
-        assert_eq!(para_enviar(&b.conn, &a).unwrap().numero, 1);
-        assert_eq!(para_enviar(&b.conn, &n).unwrap().numero, 2);
-        let nfe = criar_rascunho(&b.conn, &b.dispositivo, &u, 2, 55, 1, None, 0, "", "").unwrap();
-        assert_eq!(reservar_numero(&b.conn, &u, &nfe).unwrap(), 1, "outro modelo, outra numeração");
-        let prod = criar_rascunho(&b.conn, &b.dispositivo, &u, 1, 65, 1, None, 0, "", "").unwrap();
-        assert_eq!(reservar_numero(&b.conn, &u, &prod).unwrap(), 1, "outro ambiente, outra numeração");
-        assert!(reservar_numero(&b.conn, &u, &a).is_err(), "só o rascunho recebe número");
-        // O banco recusa o número repetido.
-        assert!(b.conn.execute("UPDATE nota_fiscal SET numero = 1 WHERE id = ?1", [&n]).is_err());
-    }
-
-    /// Com o fiscal desligado, a transmissão não chama o emissor (a porta do FIS-LIGA) e a nota fica desconhecida
-    /// (o "enviada" já estava gravado): o certo é consultar quando ligar.
-    #[test]
-    fn pacote_e_fiscal_desligado_nao_chama_o_emissor() {
+    fn r1_cm4_numeracao_na_hora_de_transmitir() {
         let (mut b, u) = banco();
-        crate::fiscal_porta::desligar(&b.conn, &b.dispositivo, &u, true).unwrap();
-        let id = nova(&b, &u);
-        let mut falso = Falso::com(vec![sefaz("100", "Autorizado")]);
-        assert_eq!(transmitir(&mut b.conn, &u, &mut falso, &id).unwrap(), "desconhecida");
-        assert!(falso.enviadas.is_empty());
+        let a = nova(&b, &u);
+        assert_eq!(numero(&b, &a), 0, "o rascunho não tem número");
+        let mut falso = Falso::com(vec![ok("100"); 8]);
+        transmitir(&mut b.conn, &u, &mut falso, &a).unwrap();
+        assert_eq!(numero(&b, &a), 1);
+        // Outro modelo, outro ambiente: outra numeração.
+        let nfe = criar_rascunho(&b.conn, &b.dispositivo, &u, 2, 55, 1, None, 0, "", "").unwrap();
+        transmitir(&mut b.conn, &u, &mut falso, &nfe).unwrap();
+        assert_eq!(numero(&b, &nfe), 1, "outro modelo");
+        // O piso: o sistema de antes já emitiu até a 500 nesta série.
+        crate::config::gravar(&b.conn, &chave_do_piso(2, 65, 1), "500").unwrap();
+        let p = nova(&b, &u);
+        transmitir(&mut b.conn, &u, &mut falso, &p).unwrap();
+        assert_eq!(numero(&b, &p), 501);
+        // Um backup antigo, sem as notas: o contador (local, preservado) não deixa o número voltar.
+        b.conn.execute("DELETE FROM nota_fiscal_evento", []).unwrap();
+        b.conn.execute("DELETE FROM nota_fiscal", []).unwrap();
+        crate::config::gravar(&b.conn, &chave_do_piso(2, 65, 1), "").unwrap();
+        let depois = nova(&b, &u);
+        transmitir(&mut b.conn, &u, &mut falso, &depois).unwrap();
+        assert_eq!(numero(&b, &depois), 502);
+        // A rejeitada descartada devolve o número; a próxima nota o usa.
+        let mut rej = Falso::com(vec![Some(("225", Chave::Vazia, false)), Some(("110", Chave::Desta, true))]);
+        let r = nova(&b, &u);
+        assert_eq!(transmitir(&mut b.conn, &u, &mut rej, &r).unwrap(), "rejeitada");
+        assert_eq!(numero(&b, &r), 503);
+        descartar(&b.conn, &u, &r).unwrap();
+        assert_eq!((situacao(&b, &r), numero(&b, &r)), ("descartada".to_string(), 0));
+        let d = nova(&b, &u);
+        assert_eq!(transmitir(&mut b.conn, &u, &mut rej, &d).unwrap(), "denegada");
+        assert_eq!(numero(&b, &d), 503, "o número devolvido");
+        assert!(descartar(&b.conn, &u, &d).is_err(), "a denegada não se descarta (o número foi usado)");
+        let e = nova(&b, &u);
+        transmitir(&mut b.conn, &u, &mut falso, &e).unwrap();
+        assert_eq!(numero(&b, &e), 504);
+        // O banco recusa o número repetido.
+        assert!(b.conn.execute("UPDATE nota_fiscal SET numero = 504 WHERE id = ?1", [&d]).is_err());
+        // O rascunho descartado não mexe na numeração.
+        let rasc = nova(&b, &u);
+        descartar(&b.conn, &u, &rasc).unwrap();
+        let f = nova(&b, &u);
+        transmitir(&mut b.conn, &u, &mut falso, &f).unwrap();
+        assert_eq!(numero(&b, &f), 505);
     }
 
-    /// FIS-P3: cada impedimento sozinho bloqueia; sem impedimento, ir para a produção pede PRODUÇÃO e a senha; o
-    /// registro diz quem e de qual para qual.
+    /// C-M4 da R1: dois computadores não emitem na mesma série. A primeira nota reserva a série para este computador
+    /// (a reserva viaja para os outros caixas); a série que já é de outro computador não sai daqui, e a descoberta não a
+    /// confirma.
+    #[test]
+    fn r1_cm4_uma_serie_e_de_um_computador_so() {
+        let (mut b, u) = banco();
+        let id = nova(&b, &u);
+        let log = |b: &Banco| -> i64 { b.conn.query_row("SELECT COUNT(*) FROM alteracao", [], |l| l.get(0)).unwrap() };
+        let antes = log(&b);
+        transmitir(&mut b.conn, &u, &mut Falso::com(vec![ok("100")]), &id).unwrap();
+        assert_eq!(estacao_da_serie(&b.conn, 65, 1).unwrap().map(|e| e.0), Some(b.dispositivo.clone()));
+        assert!(crate::sync::chave_da_loja(&chave_da_estacao(65, 1)), "a reserva vai para os outros caixas");
+        assert!(log(&b) > antes, "e entra no registro da troca");
+        // A série 2 já é de outro computador (chegou pela troca).
+        crate::config::gravar(
+            &b.conn,
+            &chave_da_estacao(65, 2),
+            &serde_json::json!({ "dispositivo": "outro-caixa", "nome": "Caixa 2" }).to_string(),
+        )
+        .unwrap();
+        let outra = criar_rascunho(&b.conn, &b.dispositivo, &u, 2, 65, 2, None, 100, "", "").unwrap();
+        let mut falso = Falso::com(vec![ok("100")]);
+        let e = transmitir(&mut b.conn, &u, &mut falso, &outra).unwrap_err().to_string();
+        assert!(e.contains("Caixa 2") && e.contains("série 2"), "{e}");
+        assert_eq!((situacao(&b, &outra), numero(&b, &outra)), ("rascunho".to_string(), 0));
+        assert!(falso.enviadas.is_empty());
+        assert!(crate::fiscal_descoberta::usar(&b.conn, &b.dispositivo, &u, "serieNfce", "2", None).is_err());
+        assert!(crate::config::ler(&b.conn, "fiscal_serie_nfce").unwrap().is_none());
+        crate::fiscal_descoberta::usar(&b.conn, &b.dispositivo, &u, "serieNfce", "1", None).unwrap();
+    }
+
+    /// C-M2 da R1: com o fiscal desligado, nada sai e nada muda (a nota não vira "sem resposta" sem ter saído).
+    #[test]
+    fn r1_cm2_fiscal_desligado_nao_muda_a_nota() {
+        let (mut b, u) = banco();
+        let id = nova(&b, &u);
+        let outra = nova(&b, &u);
+        transmitir(&mut b.conn, &u, &mut Falso::com(vec![None]), &outra).unwrap();
+        crate::fiscal_porta::desligar(&b.conn, &b.dispositivo, &u, true).unwrap();
+        let mut falso = Falso::com(vec![ok("100"), ok("100")]);
+        let e = transmitir(&mut b.conn, &u, &mut falso, &id).unwrap_err().to_string();
+        assert!(e.contains("desligado") && e.contains("nada foi enviado"), "{e}");
+        assert_eq!((situacao(&b, &id), numero(&b, &id)), ("rascunho".to_string(), 0));
+        assert!(consultar(&mut b.conn, &u, &mut falso, &outra).is_err());
+        assert_eq!(situacao(&b, &outra), "desconhecida");
+        assert!(falso.enviadas.is_empty() && falso.consultas == 0);
+    }
+
+    /// C-M3 da R1: a nota só fala com a SEFAZ no ambiente em que foi criada.
+    #[test]
+    fn r1_cm3_ambiente_da_nota_e_o_do_computador() {
+        let (mut b, u) = banco();
+        let id = nova(&b, &u);
+        let solta = nova(&b, &u);
+        transmitir(&mut b.conn, &u, &mut Falso::com(vec![None]), &solta).unwrap();
+        crate::config::gravar(&b.conn, "fiscal_ambiente", "1").unwrap();
+        let mut falso = Falso::com(vec![ok("100"), ok("100")]);
+        let e = transmitir(&mut b.conn, &u, &mut falso, &id).unwrap_err().to_string();
+        assert!(e.contains("homologação") && e.contains("produção"), "{e}");
+        assert!(consultar(&mut b.conn, &u, &mut falso, &solta).is_err());
+        assert_eq!((situacao(&b, &id), situacao(&b, &solta)), ("rascunho".to_string(), "desconhecida".to_string()));
+        assert!(falso.enviadas.is_empty() && falso.consultas == 0);
+    }
+
+    /// FIS-P3: cada impedimento sozinho bloqueia; sem impedimento, ir para a produção pede PRODUÇÃO e a senha conferida;
+    /// o registro diz quem e de qual para qual. B7 da R1: voltar para a homologação só depende das notas no meio.
     #[test]
     fn pacote_f_troca_de_ambiente() {
-        let (b, u) = banco();
+        let (mut b, u) = banco();
         let liberar = |b: &Banco| {
             crate::config::gravar(&b.conn, "fiscal_certificado_testado", "1").unwrap();
             crate::config::gravar(&b.conn, "fiscal_serie_nfce", "1").unwrap();
@@ -811,7 +1337,6 @@ mod testes {
         );
         liberar(&b);
         assert!(impedimentos_da_troca(&b.conn).unwrap().is_empty());
-        // Cada impedimento sozinho bloqueia, e digitar PRODUÇÃO com a senha não passa.
         for (chave, valor) in [
             ("fiscal_certificado_testado", "0"),
             ("fiscal_serie_nfce", ""),
@@ -821,24 +1346,25 @@ mod testes {
             crate::config::gravar(&b.conn, chave, valor).unwrap();
             assert_eq!(impedimentos_da_troca(&b.conn).unwrap().len(), 1, "{chave}");
             assert!(
-                trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "PRODUÇÃO", "senha-da-ana-1").is_err(),
-                "{chave}"
+                trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "PRODUÇÃO", Some("Ana")).is_err(),
+                "{chave}: a senha conferida não contorna"
             );
             liberar(&b);
         }
         crate::fiscal_porta::desligar(&b.conn, &b.dispositivo, &u, true).unwrap();
         assert_eq!(impedimentos_da_troca(&b.conn).unwrap().len(), 1, "o fiscal desligado");
         crate::fiscal_porta::ligar(&b.conn, &b.dispositivo, &u, true, "senha-da-ana-1").unwrap();
-        // Uma nota sem resposta conclusiva no ambiente atual bloqueia.
+        // Uma nota sem resposta conclusiva no ambiente atual bloqueia; o rascunho, não.
         let id = nova(&b, &u);
-        assert_eq!(impedimentos_da_troca(&b.conn).unwrap().len(), 1, "a numerada");
-        b.conn.execute("UPDATE nota_fiscal SET estado = 'autorizada' WHERE id = ?1", [&id]).unwrap();
-        // Sem impedimento: quem não é gerente não troca; sem PRODUÇÃO ou com a senha errada, não.
-        assert!(trocar_ambiente(&b.conn, &b.dispositivo, &u, false, 1, "PRODUÇÃO", "senha-da-ana-1").is_err());
-        assert!(trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "producao", "senha-da-ana-1").is_err());
-        assert!(trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "PRODUÇÃO", "errada").is_err());
+        assert!(impedimentos_da_troca(&b.conn).unwrap().is_empty(), "o rascunho não bloqueia");
+        transmitir(&mut b.conn, &u, &mut Falso::com(vec![None]), &id).unwrap();
+        assert_eq!(impedimentos_da_troca(&b.conn).unwrap().len(), 1, "a sem resposta");
+        consultar(&mut b.conn, &u, &mut Falso::com(vec![ok("100")]), &id).unwrap();
+        assert!(trocar_ambiente(&b.conn, &b.dispositivo, &u, false, 1, "PRODUÇÃO", Some("Ana")).is_err());
+        assert!(trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "producao", Some("Ana")).is_err());
+        assert!(trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "PRODUÇÃO", None).is_err(), "sem a senha");
         assert_eq!(ambiente(&b.conn).unwrap(), 2);
-        assert_eq!(trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "PRODUÇÃO", "senha-da-ana-1").unwrap(), 1);
+        assert_eq!(trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "PRODUÇÃO", Some("Ana")).unwrap(), 1);
         let registro: String = b
             .conn
             .query_row("SELECT detalhes FROM auditoria WHERE acao = 'fiscal.ambiente'", [], |l| l.get(0))
@@ -846,32 +1372,116 @@ mod testes {
         assert!(registro.contains("Ana") && registro.contains("de homologação para produção"), "{registro}");
         // A numeração é separada por ambiente: a primeira de produção é a 1.
         let p = criar_rascunho(&b.conn, &b.dispositivo, &u, 1, 65, 1, None, 0, "", "").unwrap();
-        assert_eq!(reservar_numero(&b.conn, &u, &p).unwrap(), 1);
+        transmitir(&mut b.conn, &u, &mut Falso::com(vec![ok("100")]), &p).unwrap();
+        assert_eq!(numero(&b, &p), 1);
+        // B7: na produção, sem certificado testado nem credenciamento, a volta para a homologação é livre.
+        crate::config::gravar(&b.conn, "fiscal_certificado_testado", "0").unwrap();
+        crate::config::gravar(&b.conn, "fiscal_credenciado", "0").unwrap();
+        assert!(impedimentos_da_troca(&b.conn).unwrap().is_empty());
+        assert_eq!(trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 2, "", None).unwrap(), 2);
     }
 
-    /// FIS-P1: os indicadores filtram, a pesquisa e o período também, e o ambiente vem junto.
+    /// B1 da R1: a senha da troca para a produção tem a espera depois de 5 erros e o registro de cada erro (a mesma
+    /// conferência do FIS-LIGA).
+    #[test]
+    fn r1_b1_senha_da_producao_com_espera_e_registro() {
+        let (b, u) = banco();
+        for _ in 0..5 {
+            let e = crate::fiscal_porta::conferir_senha_do_gerente(
+                &b.conn,
+                &b.dispositivo,
+                &u,
+                "errada",
+                "ir para a produção",
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(e.contains("errada"), "{e}");
+        }
+        let e = crate::fiscal_porta::conferir_senha_do_gerente(
+            &b.conn,
+            &b.dispositivo,
+            &u,
+            "senha-da-ana-1",
+            "ir para a produção",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("Espere"), "a certa também espera: {e}");
+        let n: i64 = b
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM auditoria WHERE acao = 'gerente.senha_errada' AND detalhes LIKE '%ir para a produção%'",
+                [],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 5);
+    }
+
+    /// FIS-P1 (texto A §12, C-M9 da R1): os quatro indicadores (Autorizadas, Pendentes, Rejeitadas e Canceladas) e o
+    /// aviso das sem resposta; a pesquisa e o período filtram; a descartada some; B8: a pesquisa não acha pelo
+    /// documento do destinatário (fica escondido).
     #[test]
     fn pacote_e_painel_filtra() {
         let (mut b, u) = banco();
-        let mut falso = Falso::com(vec![sefaz("100", "Autorizado"), sefaz("225", "Rejeição"), None]);
+        let mut falso = Falso::com(vec![ok("100"), Some(("225", Chave::Vazia, false)), None]);
         for _ in 0..3 {
             let id = nova(&b, &u);
             transmitir(&mut b.conn, &u, &mut falso, &id).unwrap();
         }
+        let c = criar_rascunho(&b.conn, &b.dispositivo, &u, 2, 65, 1, None, 0, "12345678909", "Bia").unwrap();
+        b.conn.execute("UPDATE nota_fiscal SET estado = 'cancelada' WHERE id = ?1", [&c]).unwrap();
         nova(&b, &u);
+        let descartada = nova(&b, &u);
+        descartar(&b.conn, &u, &descartada).unwrap();
         let p = painel(&b.conn, &Filtros::default()).unwrap();
-        assert_eq!((p.autorizadas, p.rejeitadas, p.desconhecidas, p.pendentes, p.total), (1, 1, 1, 1, 4));
+        assert_eq!(
+            (p.autorizadas, p.pendentes, p.rejeitadas, p.canceladas, p.sem_resposta, p.total),
+            (1, 2, 1, 1, 1, 5)
+        );
         assert_eq!(p.ambiente, 2, "homologação de fábrica");
-        let so = painel(&b.conn, &Filtros { indicador: "desconhecidas".into(), ..Default::default() }).unwrap();
-        assert_eq!(so.notas.len(), 1);
-        assert_eq!(so.notas[0].estado, "desconhecida");
-        let numero = painel(&b.conn, &Filtros { texto: "4".into(), ..Default::default() }).unwrap();
-        assert_eq!(numero.notas.len(), 1);
+        let so = painel(&b.conn, &Filtros { indicador: "sem_resposta".into(), ..Default::default() }).unwrap();
+        assert_eq!((so.notas.len(), so.notas[0].estado.as_str()), (1, "desconhecida"));
+        let canc = painel(&b.conn, &Filtros { indicador: "canceladas".into(), ..Default::default() }).unwrap();
+        assert_eq!(canc.notas.len(), 1);
+        // O número acha a nota (e a chave de 44 dígitos, que também se pesquisa, pode trazer outras junto).
+        let numero3 = painel(&b.conn, &Filtros { texto: "3".into(), ..Default::default() }).unwrap();
+        assert!(numero3.notas.iter().any(|n| n.numero == 3 && n.estado == "desconhecida"), "{:?}", numero3.notas);
+        let pela_chave = painel(&b.conn, &Filtros { texto: chave(65, 1, 1, 1), ..Default::default() }).unwrap();
+        assert_eq!((pela_chave.notas.len(), pela_chave.notas[0].estado.as_str()), (1, "autorizada"));
+        assert_eq!(painel(&b.conn, &Filtros { texto: "Bia".into(), ..Default::default() }).unwrap().notas.len(), 1);
+        assert!(painel(&b.conn, &Filtros { texto: "456789".into(), ..Default::default() }).unwrap().notas.is_empty());
         let nada =
             painel(&b.conn, &Filtros { de: "2000-01-01".into(), ate: "2000-01-02".into(), ..Default::default() })
                 .unwrap();
         assert!(nada.notas.is_empty());
-        let nfe = painel(&b.conn, &Filtros { modelo: 55, ..Default::default() }).unwrap();
-        assert!(nfe.notas.is_empty());
+        assert!(painel(&b.conn, &Filtros { modelo: 55, ..Default::default() }).unwrap().notas.is_empty());
+        // B2: "hoje" e "últimos 7 dias" contam no dia deste computador.
+        let velha = nova(&b, &u);
+        b.conn
+            .execute(
+                "UPDATE nota_fiscal SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-3 days') WHERE id = ?1",
+                [&velha],
+            )
+            .unwrap();
+        let hoje = painel(&b.conn, &Filtros { dias: 1, ..Default::default() }).unwrap();
+        assert!(!hoje.notas.is_empty() && hoje.notas.iter().all(|n| n.id != velha));
+        let sete = painel(&b.conn, &Filtros { dias: 7, ..Default::default() }).unwrap();
+        assert!(sete.notas.iter().any(|n| n.id == velha));
+    }
+
+    #[test]
+    fn chave_de_acesso_confere_digito_modelo_serie_e_numero() {
+        let c = chave(65, 1, 7, 1);
+        assert!(chave_e_desta_nota(&c, 65, 1, 7));
+        assert!(!chave_e_desta_nota(&c, 55, 1, 7));
+        assert!(!chave_e_desta_nota(&c, 65, 2, 7));
+        assert!(!chave_e_desta_nota(&c, 65, 1, 8));
+        assert!(!chave_e_desta_nota(&c[..43], 65, 1, 7));
+        assert!(!chave_e_desta_nota(&format!("{}x", &c[..43]), 65, 1, 7));
+        // O exemplo do MOC 7.0, Visão Geral, item 2.2.6.2: soma das ponderações 644, resto 6, dígito 5.
+        assert_eq!(digito_da_chave(b"5206043300991100250655012000000780026730161"), 5);
+        assert!(chave_e_desta_nota("52060433009911002506550120000007800267301615", 55, 12, 780));
     }
 }

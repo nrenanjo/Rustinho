@@ -81,7 +81,7 @@ pub(super) fn expressoes(tabela: &str, todas: &[String], chave: &[String], prefi
 
 pub(super) fn filtro_config(prefixo: &str) -> String {
     format!(
-        " AND ({prefixo}.chave IN ({}) OR {prefixo}.chave LIKE '{PREFIXO_RETIRADO}%')",
+        " AND ({prefixo}.chave IN ({}) OR {prefixo}.chave LIKE '{PREFIXO_RETIRADO}%' OR {prefixo}.chave LIKE '{PREFIXO_ESTACAO_FISCAL}%')",
         CONFIG_DA_LOJA.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(", ")
     )
 }
@@ -99,7 +99,7 @@ pub fn sem_registrar<T>(tx: &Connection, uso: impl FnOnce(&Connection) -> Result
 
 /// A configuração é da loja (vai para todos os caixas)?
 pub fn chave_da_loja(chave: &str) -> bool {
-    CONFIG_DA_LOJA.contains(&chave) || chave.starts_with(PREFIXO_RETIRADO)
+    CONFIG_DA_LOJA.contains(&chave) || chave.starts_with(PREFIXO_RETIRADO) || chave.starts_with(PREFIXO_ESTACAO_FISCAL)
 }
 
 /// (Re)cria os gatilhos que registram as alterações. Roda ao abrir o banco.

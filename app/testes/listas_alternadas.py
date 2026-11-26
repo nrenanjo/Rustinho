@@ -47,6 +47,7 @@ CLASSES = {
     ("EmissaoFiscal.qml", "emissao.passos"): ("FORA", "passos da configuração fiscal (FIS-P4)"),
     ("EmissaoFiscal.qml", "!painelDescoberta.d ? [] : ["): ("FORA", RESUMO + " (dados achados nas notas, T010b)"),
     ("EmissaoFiscal.qml", "painelDescoberta.d ? painelDescoberta.d.series"): ("FORA", RESUMO + " (séries achadas, T010b)"),
+    ("EmissaoFiscal.qml", "painelDescoberta.d ? painelDescoberta.d.candidatos"): ("FORA", ESCOLHA + " (qual CNPJ é o da loja, R1 C-M8)"),
     ("SecaoNotasFiscais.qml", "secao.indicadores"): ("FORA", ESCOLHA + " (indicadores que filtram, FIS-P1)"),
     ("SecaoNotasFiscais.qml", "secao.painel ? secao.painel.notas"): ("LISTA", "notas fiscais emitidas (FIS-P1)"),
     ("SecaoNotasFiscais.qml", "secao.detalhe ? secao.detalhe.eventos"): ("LISTA", "histórico da nota (FIS-P2)"),
