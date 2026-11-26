@@ -327,14 +327,15 @@ class FormaDaChave(unittest.TestCase):
         self.reprova_com("ci.yml: o portao tem RUSTINHO_ANDROID 'nao', diferente do android: True do validar")
 
     def test_portao_diferente_do_validar_reprova(self):
-        self.mudar("ci.yml", '      RUSTINHO_ANDROID: "nao"\n      ANDROID_CHAVE_IMPRESSAO: ${{ vars.ANDROID_CHAVE_IMPRESSAO }}\n'
-                   "    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
-                   "      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2\n"
-                   "        with:\n          path: artefatos\n      - name: Conferir manifesto",
-                   '      RUSTINHO_ANDROID: "sim"\n      ANDROID_CHAVE_IMPRESSAO: ${{ vars.ANDROID_CHAVE_IMPRESSAO }}\n'
-                   "    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
-                   "      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2\n"
-                   "        with:\n          path: artefatos\n      - name: Conferir manifesto")
+        # Só o RUSTINHO_ANDROID do job do Portão muda (o bloco vai de "  portao:" até "  rascunho:").
+        caminho = os.path.join(self.raiz, "ci.yml")
+        with open(caminho, encoding="utf-8") as f:
+            texto = f.read()
+        a, b = texto.index("  portao:\n"), texto.index("  rascunho:\n")
+        bloco = texto[a:b]
+        self.assertEqual(bloco.count('RUSTINHO_ANDROID: "nao"'), 1)
+        with open(caminho, "w", encoding="utf-8") as f:
+            f.write(texto[:a] + bloco.replace('RUSTINHO_ANDROID: "nao"', 'RUSTINHO_ANDROID: "sim"') + texto[b:])
         self.reprova_com("ci.yml: o portao tem RUSTINHO_ANDROID 'sim', diferente do android: False do validar")
 
     def test_job_do_computador_pulado_pela_chave_reprova(self):
@@ -536,6 +537,81 @@ class CoberturaShardsT112(unittest.TestCase):
         self.assertFalse(m["aprovado"])
         self.assertTrue(any("incompleta ou truncada" in p for p in m["problemas"]), m["problemas"])
         self.assertNotEqual(self.c.portao("nao").returncode, 0)
+
+
+class ArtefatosUnicos(unittest.TestCase):
+    """T031: o artefatos_unicos.py reprova a execução com dois artefatos válidos do mesmo nome."""
+
+    def rodar(self, linhas):
+        d = tempfile.mkdtemp(prefix="testar_unicos_")
+        try:
+            caminho = os.path.join(d, "lista.tsv")
+            with open(caminho, "w", encoding="utf-8") as f:
+                f.write("".join(l + "\n" for l in linhas))
+            return subprocess.run([sys.executable, "-I", os.path.join(AQUI, "artefatos_unicos.py"), caminho],
+                                  capture_output=True, text=True)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_nomes_unicos_passam(self):
+        r = self.rodar(["Manifesto\t2\t2026-11-26T00:07:30Z\tfalse", "Telas-Linux-shard-3\t1\t2026-11-26T00:07:06Z\tfalse"])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_manifesto_repetido_reprova(self):
+        # O caso real (45718798615): o Manifesto da 1ª tentativa tem ID MAIOR que o da 2ª.
+        r = self.rodar(["Manifesto\t15073870866\t2026-11-25T23:44:59Z\tfalse",
+                        "Manifesto\t15073369395\t2026-11-26T00:07:30Z\tfalse"])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("Manifesto: 2 artefatos com o mesmo nome", r.stdout)
+        self.assertIn("Rode a execução INTEIRA de novo", r.stdout)
+
+    def test_repetido_expirado_nao_conta(self):
+        r = self.rodar(["Manifesto\t1\t2026-11-25T23:44:59Z\ttrue", "Manifesto\t2\t2026-11-26T00:07:30Z\tfalse"])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_lista_vazia_reprova(self):
+        r = self.rodar([])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("veio vazia", r.stdout)
+
+
+class FormaT031(unittest.TestCase):
+    """A regra 8 do conferir_portao.py (T031): conferir os repetidos antes de baixar, com actions: read."""
+
+    PASTA = FormaDaChave.PASTA
+    setUp, tearDown, mudar, conferir, reprova_com = (FormaDaChave.setUp, FormaDaChave.tearDown, FormaDaChave.mudar,
+                                                     FormaDaChave.conferir, FormaDaChave.reprova_com)
+
+    def test_os_workflows_do_projeto_passam(self):
+        r = self.conferir()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_portao_sem_a_conferencia_reprova(self):
+        with open(os.path.join(self.raiz, "ci.yml"), encoding="utf-8") as f:
+            texto = f.read()
+        i = texto.index("      - name: Conferir que nenhum artefato se repete (T031)")
+        j = texto.index("      - uses: actions/download-artifact", i)
+        with open(os.path.join(self.raiz, "ci.yml"), "w", encoding="utf-8") as f:
+            f.write(texto[:i] + texto[j:])
+        self.reprova_com("ci.yml: o portao não confere os artefatos repetidos")
+
+    def test_conferir_depois_de_baixar_reprova(self):
+        with open(os.path.join(self.raiz, "ci.yml"), encoding="utf-8") as f:
+            texto = f.read()
+        i = texto.index("      - name: Conferir que nenhum artefato se repete (T031)")
+        j = texto.index("      - uses: actions/download-artifact", i)
+        k = texto.index("          path: artefatos\n", j) + len("          path: artefatos\n")
+        with open(os.path.join(self.raiz, "ci.yml"), "w", encoding="utf-8") as f:
+            f.write(texto[:i] + texto[j:k] + texto[i:j] + texto[k:])
+        self.reprova_com("ci.yml: o portao confere os artefatos repetidos depois de baixá-los")
+
+    def test_rascunho_sem_actions_read_reprova(self):
+        self.mudar("ci.yml", "      contents: write\n      actions: read\n", "      contents: write\n")
+        self.reprova_com("ci.yml: o rascunho não pode ler a lista de artefatos")
+
+    def test_topo_sem_actions_read_reprova_o_portao(self):
+        self.mudar("ci.yml", "permissions:\n  contents: read\n  actions: read\n", "permissions:\n  contents: read\n")
+        self.reprova_com("ci.yml: o portao não pode ler a lista de artefatos")
 
 
 if __name__ == "__main__":

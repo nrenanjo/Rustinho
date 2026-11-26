@@ -35,6 +35,9 @@ Regras:
    - O workflow rápido `validar-windows.yml` (se presente) só dispara por
      `workflow_dispatch`, só lê (`contents: read`), não ignora falhas
      (`continue-on-error`) e nunca publica versão.
+8. O Portão e o rascunho rodam o `artefatos_unicos.py` antes de baixar os artefatos e têm `actions: read` (T031):
+   uma execução com dois artefatos do mesmo nome (repetição só dos jobs que falharam) reprova com a orientação de
+   rodar a execução inteira de novo.
 
 A pasta dos workflows pode vir como argumento (para os testes).
 """
@@ -192,6 +195,23 @@ def main():
     exigir(str(env_m.get("RUSTINHO_SHARDS_TELAS", "")) == esperado_env,
            f"validar.yml: o passo do manifesto tem RUSTINHO_SHARDS_TELAS={env_m.get('RUSTINHO_SHARDS_TELAS')!r}, "
            f"diferente dos {esperado_env} shard(s) esperados de programa-e-telas")
+
+    # 8. T031 (26/11/2026): o Portão e o rascunho conferem, ANTES de baixar os artefatos, que nenhum nome se repete
+    #    na execução (repetir só os jobs que falharam deixa o artefato da tentativa anterior com o mesmo nome, e o
+    #    download-artifact escolhe pelo maior ID). Precisam ler a lista (actions: read).
+    topo_perm = ci.get("permissions") or {}
+    for nome in ("portao", "rascunho"):
+        job = (ci.get("jobs") or {}).get(nome) or {}
+        passos_job = job.get("steps") or []
+        i_confere = next((i for i, p in enumerate(passos_job) if "artefatos_unicos.py" in str(p.get("run", ""))), None)
+        i_baixa = next((i for i, p in enumerate(passos_job)
+                        if str(p.get("uses", "")).lower().startswith("actions/download-artifact")), None)
+        exigir(i_confere is not None, f"ci.yml: o {nome} não confere os artefatos repetidos (artefatos_unicos.py, T031)")
+        exigir(i_confere is None or i_baixa is None or i_confere < i_baixa,
+               f"ci.yml: o {nome} confere os artefatos repetidos depois de baixá-los (T031)")
+        perm = job["permissions"] if "permissions" in job else topo_perm
+        exigir(isinstance(perm, dict) and perm.get("actions") in ("read", "write"),
+               f"ci.yml: o {nome} não pode ler a lista de artefatos (falta actions: read, T031)")
 
     if erros:
         for e in erros:
