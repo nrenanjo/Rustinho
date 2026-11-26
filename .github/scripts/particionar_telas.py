@@ -103,6 +103,7 @@ PESOS_SEGUNDOS = {
     "telas_olho1": 30,
     "telas_r1_sair": 25,
     "telas_fis_liga": 30,
+    "telas_fis_p5": 35,
     "telas_r24_gerente": 25,
     "telas_r3_comissao": 25,
     "telas_r19_cheque": 25,

@@ -1163,6 +1163,10 @@ mod testes {
         let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
         assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("1"));
         assert_eq!(carregar_regras_do_programa(&b.conn).unwrap(), 0, "a mesma versão não aplica de novo");
+        // A regra que saiu deste banco (por exemplo, a exclusão que veio de outro caixa) não volta na mesma versão.
+        b.conn.execute("DELETE FROM regra_st WHERE id = 'ba-pneus-com-st'", []).unwrap();
+        assert_eq!(crate::sync::sem_registrar(&b.conn, carregar_regras_do_programa).unwrap(), 0);
+        assert!(!regras(&b.conn).unwrap().iter().any(|r| r.id == "ba-pneus-com-st"));
         // Um caixa que ainda não aplicou: sem a regra de GO pneus e com uma regra da loja para RS 16 no período.
         b.conn
             .execute("DELETE FROM regra_st WHERE id IN ('go-pneus-com-st', 'rs-pneus-com-st', 'rs-pneus-sem-st')", [])
