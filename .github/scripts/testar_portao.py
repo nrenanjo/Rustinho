@@ -547,21 +547,60 @@ def _baixar():
     return m
 
 
+GH_FALSO = r"""#!/usr/bin/env python3
+import json, os, sys
+cfg = json.load(open(os.environ["GH_FALSO_CFG"]))
+a = sys.argv[1:]
+with open(cfg["log"], "a") as f:
+    f.write(" ".join(a) + "\n")
+if cfg.get("falhar"):
+    sys.stderr.write("HTTP 403: Resource not accessible by integration\n")
+    sys.exit(1)
+assert a[0] == "api"
+if a[1] == "--paginate":
+    exec_id = a[2].split("/runs/")[1].split("/")[0]
+    if exec_id != cfg["execucao"]:
+        sys.stderr.write("HTTP 404: execução errada\n")
+        sys.exit(1)
+    sys.stdout.write(cfg["lista"])
+elif a[1].endswith("/zip"):
+    ident = a[1].split("/artifacts/")[1].split("/")[0]
+    sys.stdout.buffer.write(open(os.path.join(cfg["zips"], ident + ".zip"), "rb").read())
+else:
+    sys.stderr.write("HTTP 404: sem --paginate na lista\n")
+    sys.exit(1)
+"""
+
+
+def _zip(arquivos):
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for nome, conteudo in arquivos.items():
+            z.writestr(nome, conteudo)
+    return buf.getvalue()
+
+
 class BaixarArtefatos(unittest.TestCase):
     """T031: de cada nome, o artefato mais novo pela data (não pelo maior ID)."""
 
     def setUp(self):
         self.b = _baixar()
 
+    def ids(self, linhas):
+        esc, deix = self.b.escolher(linhas)
+        return {n: v[0] for n, v in esc.items()}, deix
+
     def test_manifesto_da_segunda_tentativa_vence_mesmo_com_id_menor(self):
         # O caso real (45718798615): o Manifesto da 1ª tentativa tem ID MAIOR que o da 2ª.
-        esc, deix = self.b.escolher(["Manifesto\t15073870866\t2026-11-25T23:44:59Z\tfalse",
-                                     "Manifesto\t15073369395\t2026-11-26T00:07:30Z\tfalse"])
+        esc, deix = self.ids(["Manifesto\t15073870866\t2026-11-25T23:44:59Z\tfalse",
+                              "Manifesto\t15073369395\t2026-11-26T00:07:30Z\tfalse"])
         self.assertEqual(esc, {"Manifesto": 15073369395})
         self.assertEqual(deix, {"Manifesto": [15073870866]})
 
     def test_varios_nomes_e_tres_copias(self):
-        esc, deix = self.b.escolher([
+        esc, deix = self.ids([
             "Telas-Linux-shard-3\t30\t2026-11-25T23:25:17Z\tfalse",
             "Telas-Linux-shard-3\t10\t2026-11-26T01:00:00Z\tfalse",
             "Telas-Linux-shard-3\t20\t2026-11-26T00:07:06Z\tfalse",
@@ -571,34 +610,144 @@ class BaixarArtefatos(unittest.TestCase):
         self.assertEqual(esc, {"Telas-Linux-shard-3": 10, "Manifesto": 5, "Rustinho-Linux": 7})
         self.assertEqual(deix, {"Telas-Linux-shard-3": [30, 20]})
 
-    def test_expirado_nao_conta(self):
-        esc, _ = self.b.escolher(["Manifesto\t1\t2026-11-27T00:00:00Z\ttrue",
-                                  "Manifesto\t2\t2026-11-26T00:07:30Z\tfalse"])
+    def test_expirado_nao_conta_nem_quando_vem_sem_data(self):
+        esc, _ = self.ids(["Manifesto\t1\t2026-11-27T00:00:00Z\ttrue", "Manifesto\t3\t\ttrue",
+                           "Manifesto\t2\t2026-11-26T00:07:30Z\tfalse"])
         self.assertEqual(esc, {"Manifesto": 2})
 
-    def test_mesma_data_vence_o_maior_id(self):
-        esc, _ = self.b.escolher(["A\t3\t2026-11-26T00:00:00Z\tfalse", "A\t9\t2026-11-26T00:00:00Z\tfalse"])
-        self.assertEqual(esc, {"A": 9})
+    def test_mesma_data_vence_o_maior_id_em_qualquer_ordem(self):
+        for linhas in (["A\t3\t2026-11-26T00:00:00Z\tfalse", "A\t9\t2026-11-26T00:00:00Z\tfalse"],
+                       ["A\t9\t2026-11-26T00:00:00Z\tfalse", "A\t3\t2026-11-26T00:00:00Z\tfalse"]):
+            self.assertEqual(self.ids(linhas)[0], {"A": 9})
+
+    def test_digest_acompanha_o_escolhido(self):
+        esc, _ = self.b.escolher(["M\t1\t2026-11-25T00:00:00Z\tfalse\tsha256:aa",
+                                  "M\t2\t2026-11-26T00:00:00Z\tfalse\tsha256:bb"])
+        self.assertEqual(esc, {"M": (2, "sha256:bb")})
 
     def test_linha_malformada_para(self):
-        for ruim in ["Manifesto\t5\t2026-11-26T00:07:30Z", "Manifesto\tx\t2026-11-26T00:07:30Z\tfalse",
-                     "\t5\t2026-11-26T00:07:30Z\tfalse"]:
+        for ruim in ["Manifesto\t5", "Manifesto\tx\t2026-11-26T00:07:30Z\tfalse",
+                     "\t5\t2026-11-26T00:07:30Z\tfalse", "Manifesto\t5\t\tfalse"]:
             with self.assertRaises(ValueError, msg=ruim):
                 self.b.escolher([ruim])
 
     def test_zip_com_caminho_para_fora_e_recusado(self):
+        for ruim in ("../fora.txt", "../" + "x" + "-irmao/fora.txt"):
+            d = tempfile.mkdtemp(prefix="testar_zip_")
+            try:
+                with self.assertRaises(ValueError, msg=ruim):
+                    self.b.extrair(_zip({ruim.replace("x-irmao", os.path.basename(d) + "-irmao"): "x"}), d)
+                self.assertEqual(os.listdir(d), [])
+            finally:
+                shutil.rmtree(d, ignore_errors=True)
+                shutil.rmtree(d + "-irmao", ignore_errors=True)
+
+    def test_nome_com_acento_sem_o_sinal_utf8(self):
+        # Um zip com o nome em UTF-8 SEM o sinal (bit 11): o zipfile leria como cp437 ("relat├│rio.txt").
+        nome = "relatório.txt"
+        provisorio = "relatXXrio.txt"
+        self.assertEqual(len(provisorio.encode()), len(nome.encode()))
+        dados = _zip({provisorio: "x"}).replace(provisorio.encode(), nome.encode())
         import io
         import zipfile
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as z:
-            z.writestr("../fora.txt", "x")
+        with zipfile.ZipFile(io.BytesIO(dados)) as z:
+            self.assertFalse(z.infolist()[0].flag_bits & 0x800, "o zip do teste não pode ter o sinal UTF-8")
         d = tempfile.mkdtemp(prefix="testar_zip_")
         try:
-            with self.assertRaises(ValueError):
-                self.b.extrair(buf.getvalue(), d)
-            self.assertFalse(os.path.exists(os.path.join(os.path.dirname(d), "fora.txt")))
+            self.b.extrair(dados, d)
+            self.assertEqual(os.listdir(d), [nome])
         finally:
             shutil.rmtree(d, ignore_errors=True)
+
+
+class BaixarArtefatosMain(unittest.TestCase):
+    """T031 (R15-M1): o main() de verdade, com um `gh` falso no PATH."""
+
+    def setUp(self):
+        import hashlib
+        self.d = tempfile.mkdtemp(prefix="testar_baixar_")
+        os.makedirs(os.path.join(self.d, "bin"))
+        os.makedirs(os.path.join(self.d, "zips"))
+        gh = os.path.join(self.d, "bin", "gh")
+        with open(gh, "w", encoding="utf-8") as f:
+            f.write(GH_FALSO)
+        os.chmod(gh, 0o755)
+        velho = _zip({"MANIFESTO.json": '{"aprovado": false}'})
+        novo = _zip({"MANIFESTO.json": '{"aprovado": true}', "NOTAS.md": "n"})
+        telas = _zip({"telas.txt": "ok", "fotos/a/1.png": "png"})
+        self.zips = {"900": velho, "100": novo, "50": telas}
+        for ident, dados in self.zips.items():
+            with open(os.path.join(self.d, "zips", ident + ".zip"), "wb") as f:
+                f.write(dados)
+        dig = {k: "sha256:" + hashlib.sha256(v).hexdigest() for k, v in self.zips.items()}
+        self.cfg = {"log": os.path.join(self.d, "chamadas.log"), "zips": os.path.join(self.d, "zips"),
+                    "execucao": "777", "lista": (
+                        f"Manifesto\t900\t2026-11-25T23:44:59Z\tfalse\t{dig['900']}\n"
+                        f"Manifesto\t100\t2026-11-26T00:07:30Z\tfalse\t{dig['100']}\n"
+                        f"Telas-Linux-shard-3\t50\t2026-11-26T00:07:06Z\tfalse\t{dig['50']}\n")}
+        self.destino = os.path.join(self.d, "artefatos")
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def rodar(self, *args, execucao_env="777"):
+        cfg = os.path.join(self.d, "cfg.json")
+        with open(cfg, "w", encoding="utf-8") as f:
+            json.dump(self.cfg, f)
+        env = dict(os.environ, PATH=os.path.join(self.d, "bin") + os.pathsep + os.environ["PATH"],
+                   GH_FALSO_CFG=cfg, GITHUB_REPOSITORY="dono/repo", GITHUB_RUN_ID=execucao_env,
+                   BAIXAR_ARTEFATOS_ESPERA="0")
+        return subprocess.run([sys.executable, "-I", os.path.join(AQUI, "baixar_artefatos.py"), self.destino, *args],
+                              capture_output=True, text=True, env=env)
+
+    def test_baixa_o_manifesto_novo_e_a_pasta_de_cada_nome(self):
+        r = self.rodar()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with open(os.path.join(self.destino, "Manifesto", "MANIFESTO.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"aprovado": True})
+        self.assertTrue(os.path.isfile(os.path.join(self.destino, "Telas-Linux-shard-3", "fotos", "a", "1.png")))
+        self.assertEqual(sorted(os.listdir(self.destino)), ["Manifesto", "Telas-Linux-shard-3"])
+        with open(self.cfg["log"], encoding="utf-8") as f:
+            chamadas = f.read()
+        self.assertIn("--paginate repos/dono/repo/actions/runs/777/artifacts", chamadas)
+        self.assertNotIn("artifacts/900/zip", chamadas)
+        self.assertIn("deixados de lado", r.stdout)
+
+    def test_um_nome_de_outra_execucao_direto_na_pasta(self):
+        self.cfg["execucao"] = "555"
+        r = self.rodar("--nome", "Manifesto", "--execucao", "555")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(sorted(os.listdir(self.destino)), ["MANIFESTO.json", "NOTAS.md"])
+
+    def test_execucao_vazia_e_a_atual(self):
+        r = self.rodar("--nome", "Manifesto", "--execucao", "")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_nome_que_nao_existe_falha(self):
+        r = self.rodar("--nome", "Rustinho-Linux")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("não tem o artefato 'Rustinho-Linux'", r.stdout)
+
+    def test_digest_errado_falha(self):
+        self.cfg["lista"] = self.cfg["lista"].replace("Manifesto\t100\t2026-11-26T00:07:30Z\tfalse\tsha256:",
+                                                      "Manifesto\t100\t2026-11-26T00:07:30Z\tfalse\tsha256:0")
+        r = self.rodar()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("não bate com o digest", r.stdout)
+
+    def test_lista_vazia_falha(self):
+        self.cfg["lista"] = ""
+        r = self.rodar()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("nenhum artefato", r.stdout)
+
+    def test_erro_do_gh_aparece_e_falha(self):
+        self.cfg["falhar"] = True
+        r = self.rodar()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("HTTP 403", r.stdout)
+        with open(self.cfg["log"], encoding="utf-8") as f:
+            self.assertEqual(len(f.read().splitlines()), 3, "três tentativas")
 
 
 class FormaT031(unittest.TestCase):
@@ -607,7 +756,8 @@ class FormaT031(unittest.TestCase):
     PASTA = FormaDaChave.PASTA
     setUp, tearDown, conferir, reprova_com = (FormaDaChave.setUp, FormaDaChave.tearDown, FormaDaChave.conferir,
                                               FormaDaChave.reprova_com)
-    ONDE = (("ci.yml", "portao"), ("ci.yml", "rascunho"), ("validar.yml", "manifesto"))
+    ONDE = (("ci.yml", "portao"), ("ci.yml", "rascunho"), ("validar.yml", "manifesto"),
+            ("verificar-pacotes.yml", "windows"), ("verificar-pacotes.yml", "linux"))
 
     def mexer(self, arq, job, f):
         import yaml
@@ -638,13 +788,34 @@ class FormaT031(unittest.TestCase):
         self.cada(lambda w, j: j["steps"].remove(self.passo(j)),
                   "{arq}: o {job} não baixa os artefatos pelo baixar_artefatos.py")
 
-    def test_download_artifact_sem_nome_reprova(self):
-        self.cada(lambda w, j: j["steps"].insert(1, {"uses": "actions/download-artifact@v8", "with": {"path": "x"}}),
-                  "{arq}: o {job} baixa todos os artefatos pelo download-artifact")
+    def test_qualquer_download_artifact_reprova(self):
+        for com in ({"path": "x"}, {"name": "Manifesto", "path": "x"}):
+            self.cada(lambda w, j: j["steps"].append({"uses": "actions/download-artifact@v8", "with": com}),
+                      "{arq}: o {job} baixa artefato pelo download-artifact")
+
+    def test_actions_write_reprova(self):
+        def f(w, j):
+            w["permissions"] = {"contents": "read", "actions": "write"}
+            if "permissions" in j:
+                j["permissions"] = {"contents": "write", "actions": "write"}
+        self.cada(f, "{arq}: o {job} não pode ler a lista de artefatos")
+
+    def test_permissao_do_job_sem_actions_reprova(self):
+        def f(w, j):
+            j["permissions"] = {"contents": "read"}
+        self.cada(f, "{arq}: o {job} não pode ler a lista de artefatos")
+
+    def test_verificacao_sem_a_execucao_indicada_reprova(self):
+        for arq, job in self.ONDE[3:]:
+            with self.subTest(job=job):
+                self.tearDown()
+                self.setUp()
+                self.mexer(arq, job, lambda w, j: self.passo(j)["env"].pop("EXECUCAO"))
+                self.reprova_com(f"{arq}: o passo do baixar_artefatos.py do {job} não passa a execução indicada")
 
     def test_chamada_neutralizada_reprova(self):
         for troca in ("python3 .github/scripts/baixar_artefatos.py artefatos || true",
-                      "echo baixar_artefatos.py"):
+                      "echo baixar_artefatos.py", "python3 .github/scripts/baixar_artefatos.py outra"):
             self.cada(lambda w, j: self.passo(j).update(run=troca),
                       "{arq}: o passo do baixar_artefatos.py do {job} não é a chamada exata")
 
