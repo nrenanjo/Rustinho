@@ -89,7 +89,10 @@ pub fn estado_da_resposta(origem: Origem, cstat: &str) -> &'static str {
         && !RESULTADOS_DO_PROCESSAMENTO.contains(&n)
         && !REJEICAO_NAO_CONCLUSIVA.contains(&n)
         // os de autorização e denegação com zero à esquerda ("0100") não são rejeição
-        && !matches!(n, 100 | 110 | 120 | 150 | 301 | 302 | 303);
+        // B-5 da R7: os de autorização e denegação com zero à esquerda ("0100", "0301") não são rejeição; a lista é a das
+        // funções únicas do `nfe_xml`.
+        && !crate::nfe_xml::cstat_autorizado(&n.to_string())
+        && !crate::nfe_xml::cstat_denegado(&n.to_string());
     if origem == Origem::Envio && rejeicao {
         "rejeitada"
     } else {
@@ -887,7 +890,7 @@ pub fn pode_falar_com_a_sefaz(conn: &Connection, id: &str, consulta: bool) -> Re
     // C-7 da R5: a loja pode ter informado um CPF (a tela da loja aceita); a nota pede o CNPJ.
     if cnpj.len() == 11 {
         return Err(Erro::validacao(format!(
-            "A loja está com um CPF em Configurações › Loja, e a nota fiscal pede o CNPJ. Troque pelo CNPJ da loja em Configurações › Loja. {}.",
+            "A loja está com um CPF, e a nota fiscal pede o CNPJ. Troque pelo CNPJ da loja em Configurações › Loja. {}.",
             primeira_maiuscula(nada)
         )));
     }
@@ -1212,8 +1215,8 @@ mod testes {
         }
         for c in [
             "103", "104", "105", "106", "107", "108", "109", "124", "135", "204", "205", "206", "218", "539", "613",
-            "635", "656", "691", "692", "999", "0206", "0635", "0100", "0150", "0110", "000", "099", "10000", "12a",
-            "abc", "", " ",
+            "635", "656", "691", "692", "999", "0206", "0635", "0100", "0150", "0110", "0120", "0301", "0302", "0303",
+            "000", "099", "10000", "12a", "abc", "", " ",
         ] {
             assert_eq!(estado_da_resposta(Envio, c), "desconhecida", "envio {c:?}");
         }
@@ -1344,6 +1347,11 @@ mod testes {
             e.contains("está com um CPF") && e.contains("Troque pelo CNPJ da loja") && e.contains("Nada foi enviado"),
             "{e}"
         );
+        // B-7 da R7: "Configurações › Loja" uma vez só; e, na consulta, a mensagem diz que a consulta não foi feita.
+        assert_eq!(e.matches("Configurações › Loja").count(), 1, "{e}");
+        b.conn.execute("UPDATE nota_fiscal SET estado = 'desconhecida' WHERE id = ?1", [&id]).unwrap();
+        let e = consultar(&mut b.conn, &u, &mut Falso::com(vec![ok("100")]), &id).unwrap_err().to_string();
+        assert!(e.contains("está com um CPF") && e.contains("A consulta à SEFAZ não foi feita."), "{e}");
         // Se o CNPJ some depois do envio, a resposta ainda não é aceita sem conferir (K3).
         let (mut b, u) = banco();
         let id = nova(&b, &u);

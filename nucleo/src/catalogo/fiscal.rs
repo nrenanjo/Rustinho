@@ -694,6 +694,12 @@ struct Catalogo {
 struct Retirada {
     id: String,
     na_versao: i64,
+    /// B-1 da R7: a UF e o CEST da regra retirada, para tirar o aviso de "não entrou" mesmo quando a linha nunca entrou
+    /// no banco (foi pulada por causa de uma regra da loja).
+    #[serde(default)]
+    uf: String,
+    #[serde(default)]
+    cest_inicio: String,
 }
 
 #[derive(Deserialize)]
@@ -738,6 +744,11 @@ pub const CHAVE_CATALOGO: &str = "regras_st_catalogo";
 pub fn carregar_regras_do_programa(tx: &Connection) -> Resultado<usize> {
     let catalogo: Catalogo = serde_json::from_str(include_str!("regras_st_programa.json"))
         .map_err(|e| Erro::Interno(format!("regras_st_programa.json: {e}")))?;
+    aplicar_catalogo(tx, &catalogo)
+}
+
+/// B-2 da R7: a carga de um catálogo (o do programa ou, nos testes, um feito à mão).
+fn aplicar_catalogo(tx: &Connection, catalogo: &Catalogo) -> Resultado<usize> {
     let aplicada: i64 = config::ler(tx, CHAVE_CATALOGO)?.and_then(|v| v.parse().ok()).unwrap_or(0);
     if aplicada >= catalogo.versao {
         return Ok(0);
@@ -750,7 +761,7 @@ pub fn carregar_regras_do_programa(tx: &Connection) -> Resultado<usize> {
         .filter(|l| !l.trim().is_empty())
         .map(str::to_string)
         .collect();
-    for r in &catalogo.regras {
+    for r in catalogo.regras.iter() {
         let versao_da_linha = r.versao_da_linha.max(r.desde_versao);
         if r.desde_versao > aplicada {
             if sobreposta(tx, &r.id, &r.uf, &r.cest_inicio, &r.vigente_de, r.vigente_ate.as_deref())? {
@@ -782,7 +793,10 @@ pub fn carregar_regras_do_programa(tx: &Connection) -> Resultado<usize> {
                     r.inicio_informado
                 ],
             )?;
-        } else if versao_da_linha > aplicada {
+        }
+        // B-2 da R7: também na linha nova desta versão, se o id já estava no banco (retirado e reposto): a do programa
+        // fica com o conteúdo novo (na linha recém-inserida, nada muda).
+        if versao_da_linha > aplicada {
             // C-M6 da R1: a correção do programa vale para a linha que a loja não mudou (origem "rustinho").
             let n = tx.execute(
                 "UPDATE regra_st SET uf = ?2, cest_inicio = ?3, vigente_de = ?4, vigente_ate = ?5, com_st = ?6,
@@ -822,10 +836,14 @@ pub fn carregar_regras_do_programa(tx: &Connection) -> Resultado<usize> {
                 |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
             )
             .optional()?;
+        // C-4 da R6 e B-1 da R7: o aviso de "não entrou" sobre a regra retirada sai, mesmo se a linha nunca entrou.
+        if !r.uf.is_empty() && !r.cest_inicio.is_empty() {
+            let marca = format!("{} CEST {} (", r.uf, r.cest_inicio);
+            puladas.retain(|p| !p.starts_with(&marca));
+        }
         let Some((uf, cest, descricao)) = antes else { continue };
         tx.execute("DELETE FROM regra_st WHERE id = ?1 AND origem = 'rustinho'", [&r.id])?;
         corrigidas.push(format!("{uf} CEST {cest}: regra do programa retirada ({descricao})"));
-        // C-4 da R6: o aviso de "não entrou" sobre a regra retirada sai também.
         let marca = format!("{uf} CEST {cest} (");
         puladas.retain(|p| !p.starts_with(&marca));
     }
@@ -1617,6 +1635,53 @@ mod testes {
         assert!(registro.contains("PR CEST 0108: regra do programa retirada"), "{registro}");
         assert!(!registro.contains("pr-autopecas-"), "C-3: sem o id interno: {registro}");
         assert!(conferir(&b.conn, "2026-11-26").unwrap().regras_puladas.is_empty(), "C-4: o aviso da retirada sai");
+    }
+
+    /// B-1 e B-2 da R7, com catálogos feitos à mão: (1) um id retirado numa versão e reposto noutra fica no banco com o
+    /// conteúdo novo, mesmo num banco que pula versões; (2) o aviso de "não entrou" de uma regra retirada sai mesmo se a
+    /// linha nunca entrou (foi pulada por causa da regra da loja). E toda retirada do catálogo real tem UF e CEST.
+    #[test]
+    fn r7_b1_b2_retiradas_com_catalogo_feito_a_mao() {
+        let real: Catalogo = serde_json::from_str(include_str!("regras_st_programa.json")).unwrap();
+        assert!(real.retiradas.iter().all(|r| !r.uf.is_empty() && !r.cest_inicio.is_empty()));
+        // (1) reposta: o banco aplicou a 5 e tem a linha velha; o catálogo 7 a retira na 6 e a repõe na 7.
+        let b = Banco::em_memoria().unwrap();
+        b.conn
+            .execute(
+                "INSERT INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, origem)
+                 VALUES ('x-reposta', 'AL', '99', '2026-01-01', NULL, 1, 'velha', 'rustinho')",
+                [],
+            )
+            .unwrap();
+        config::gravar(&b.conn, CHAVE_CATALOGO, "5").unwrap();
+        let cat: Catalogo = serde_json::from_value(serde_json::json!({
+            "versao": 7,
+            "regras": [{ "id": "x-reposta", "uf": "AL", "cestInicio": "99", "vigenteDe": "2026-01-01", "vigenteAte": null,
+                         "comSt": false, "descricao": "nova", "fonte": "f", "dispositivo": "d", "consultadaEm": "2026-11-26",
+                         "desdeVersao": 7, "versaoDaLinha": 7 }],
+            "retiradas": [{ "id": "x-reposta", "naVersao": 6, "uf": "AL", "cestInicio": "99" }]
+        }))
+        .unwrap();
+        crate::sync::sem_registrar(&b.conn, |tx| aplicar_catalogo(tx, &cat)).unwrap();
+        let (desc, com_st): (String, bool) = b
+            .conn
+            .query_row("SELECT descricao, com_st FROM regra_st WHERE id = 'x-reposta'", [], |l| {
+                Ok((l.get(0)?, l.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((desc.as_str(), com_st), ("nova", false), "a reposta fica, com o conteúdo novo");
+        // (2) a pulada sem linha: a regra retirada nunca entrou no banco (a loja tinha a dela).
+        let b = Banco::em_memoria().unwrap();
+        config::gravar(&b.conn, CHAVE_PULADAS, "PR CEST 0108 (x): a loja já tem regra própria no mesmo período")
+            .unwrap();
+        config::gravar(&b.conn, CHAVE_CATALOGO, "5").unwrap();
+        let cat: Catalogo = serde_json::from_value(serde_json::json!({
+            "versao": 6, "regras": [],
+            "retiradas": [{ "id": "pr-autopecas-0108-sem-st", "naVersao": 6, "uf": "PR", "cestInicio": "0108" }]
+        }))
+        .unwrap();
+        crate::sync::sem_registrar(&b.conn, |tx| aplicar_catalogo(tx, &cat)).unwrap();
+        assert!(conferir(&b.conn, "2026-11-26").unwrap().regras_puladas.is_empty(), "o aviso da regra retirada saiu");
     }
 
     /// N-1 da R5: a linha do programa retirada numa versão sai do banco que aplicou a versão anterior; a que a loja mudou

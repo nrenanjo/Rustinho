@@ -323,8 +323,10 @@ ColumnLayout {
                         Text {
                             text: (linhaSerie.modelData.modelo === 65 ? "NFC-e" : "NF-e") + " série " + linhaSerie.modelData.serie
                                   + (linhaSerie.modelData.ambiente === 1 ? " (produção)" : " (homologação)")
-                                  + ": último número " + linhaSerie.modelData.ultimoNumero + " · " + linhaSerie.modelData.notas
-                                  + (linhaSerie.modelData.notas === 1 ? " nota" : " notas")
+                                  // B-4 da R7: a série só com notas denegadas diz isso (e não "0 notas").
+                                  + ": último número " + linhaSerie.modelData.ultimoNumero + " · "
+                                  + (linhaSerie.modelData.notas === 0 ? "só notas denegadas (o número delas foi gasto)"
+                                     : linhaSerie.modelData.notas + (linhaSerie.modelData.notas === 1 ? " nota" : " notas"))
                                   // K5 da R2: o último número é o das notas desta pasta.
                                   + (linhaSerie.modelData.ambiente === 1 ? ". Usando esta série, a próxima nota do Rustinho sai depois da "
                                                                            + linhaSerie.modelData.ultimoNumero

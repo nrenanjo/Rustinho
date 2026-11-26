@@ -186,6 +186,13 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
         for n in notas.iter().filter(|n| !n.denegada) {
             *conta.entry(crate::documento::limpar(&n.cnpj)).or_default() += 1;
         }
+        // B-4 da R7: sem nenhuma autorizada, o emitente das denegadas é o candidato (com 0 autorizadas), para o número
+        // gasto delas virar o piso; com mais de um emitente, a tela pergunta, como sempre.
+        if conta.is_empty() {
+            for n in &notas {
+                conta.entry(crate::documento::limpar(&n.cnpj)).or_default();
+            }
+        }
         if conta.len() > 1 {
             let mut c: Vec<Candidato> = conta.into_iter().map(|(cnpj, notas)| Candidato { cnpj, notas }).collect();
             c.sort_by(|a, b| b.notas.cmp(&a.notas).then(a.cnpj.cmp(&b.cnpj)));
@@ -345,7 +352,7 @@ mod comandos {
     struct Usar {
         campo: String,
         valor: String,
-        /// Na série: o ambiente e o último número autorizado nela (0 = sem).
+        /// Na série: o ambiente e o maior número já usado nela, autorizado ou denegado (0 = sem).
         ambiente: i64,
         ultimo_numero: i64,
     }
@@ -434,6 +441,41 @@ mod testes {
             .unwrap();
         assert_eq!(registros, 2);
         assert!(!crate::sync::chave_da_loja("fiscal_serie_nfce"), "a série fica só neste computador");
+    }
+
+    /// B-4 da R7: sem o CNPJ da loja e com uma pasta só de notas denegadas do mesmo emitente, ele é a loja e o número
+    /// gasto vira o piso (a denegada não vira "outro emitente").
+    #[test]
+    fn r7_b4_so_denegadas_sem_cnpj_da_loja() {
+        let denegada = nfce(45, 1, "000001", "3").replace("<cStat>100</cStat>", "<cStat>302</cStat>");
+        let d = descobrir_de_xml(&[("b.xml".into(), denegada)], "");
+        assert!(d.ignorados.is_empty(), "{:?}", d.ignorados);
+        assert_eq!(d.lidas, 0);
+        assert_eq!(d.series, vec![Serie { ambiente: 1, modelo: 65, serie: 1, ultimo_numero: 45, notas: 0 }]);
+    }
+
+    /// B-3 da R7: na pergunta "qual é a loja", a contagem de cada emitente é só das autorizadas.
+    #[test]
+    fn r7_b3_candidatos_contam_so_as_autorizadas() {
+        let loja = |n: i64| nfce(n, 1, "000001", "1");
+        let denegada = nfce(43, 1, "000001", "1").replace("<cStat>100</cStat>", "<cStat>302</cStat>");
+        let fornecedor = nfce(7, 1, "000001", "3").replace("11222333000181", "99888777000166");
+        let d = descobrir_de_xml(
+            &[
+                ("a.xml".into(), loja(41)),
+                ("b.xml".into(), loja(42)),
+                ("c.xml".into(), denegada),
+                ("d.xml".into(), fornecedor),
+            ],
+            "",
+        );
+        assert_eq!(
+            d.candidatos,
+            vec![
+                Candidato { cnpj: "11222333000181".into(), notas: 2 },
+                Candidato { cnpj: "99888777000166".into(), notas: 1 }
+            ]
+        );
     }
 
     /// C-8 da R5: a nota denegada gastou o número: entra no piso da série (o último número), mas não nos dados.

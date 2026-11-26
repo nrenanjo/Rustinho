@@ -846,67 +846,99 @@
  "retiradas": [
   {
    "id": "pr-autopecas-01019-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01019"
   },
   {
    "id": "pr-autopecas-01058-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01058"
   },
   {
    "id": "pr-autopecas-0106201-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "0106201"
   },
   {
    "id": "pr-autopecas-01071-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01071"
   },
   {
    "id": "pr-autopecas-01072-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01072"
   },
   {
    "id": "pr-autopecas-01073-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01073"
   },
   {
    "id": "pr-autopecas-01074-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01074"
   },
   {
    "id": "pr-autopecas-01075-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01075"
   },
   {
    "id": "pr-autopecas-01076-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01076"
   },
   {
    "id": "pr-autopecas-01077-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01077"
   },
   {
    "id": "pr-autopecas-01078-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01078"
   },
   {
    "id": "pr-autopecas-01079-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "01079"
   },
   {
    "id": "pr-autopecas-0108-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "0108"
   },
   {
    "id": "pr-autopecas-0109-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "0109"
   },
   {
    "id": "pr-autopecas-011-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "011"
   },
   {
    "id": "pr-autopecas-019-sem-st",
-   "naVersao": 6
+   "naVersao": 6,
+   "uf": "PR",
+   "cestInicio": "019"
   }
  ]
 }
