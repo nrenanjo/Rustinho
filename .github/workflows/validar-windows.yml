@@ -91,6 +91,7 @@ jobs:
         if: always()
         with:
           name: Testes-Windows-${{ matrix.parte }}
+          overwrite: true
           path: testes/
           retention-days: 30
 
@@ -249,6 +250,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Rustinho-Windows
+          overwrite: true
           path: |
             saida/*-Windows-instalador.exe
             saida/*-Windows-instalador.exe.sha256
@@ -258,6 +260,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Rustinho-Windows-portatil
+          overwrite: true
           path: |
             saida/*.zip
             saida/*.zip.sha256
@@ -313,5 +316,6 @@ jobs:
         if: always()
         with:
           name: verificacao-windows
+          overwrite: true
           path: verificacao/
           retention-days: 30
