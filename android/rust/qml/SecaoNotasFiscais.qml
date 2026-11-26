@@ -221,7 +221,9 @@ ColumnLayout {
                 secao.carregar()
             }
         }
-        RowLayout {
+        // Linha, e não RowLayout: no celular (360 px) o campo, o Período (180) e o Tipo (220) lado a lado alargavam
+        // o painel inteiro e os textos passavam da borda (geometria G4); na tela estreita, um embaixo do outro.
+        Linha {
             spacing: 10
             Layout.fillWidth: true
             Campo {

@@ -70,7 +70,7 @@ def clicar_na_linha(r, texto_da_linha, botao):
 
 def abrir_descoberta(r):
     """Clica "Trazer os dados…", sobe para Documents na janela de pasta do sistema e abre (lê ela e as subpastas)."""
-    if not clicar_rolando(r, "Trazer os dados das notas que a loja já emitiu"):
+    if not clicar_rolando(r, "Ler as notas da loja"):
         raise RuntimeError(f"não achei o botão da descoberta (veja {r.saida})")
     time.sleep(2)
     janela = nav.janela_de_arquivos(TITULO)
@@ -163,6 +163,40 @@ def main():
             tudo_certo &= conferir("C-1 (R4): CNPJ alfanumérico confere com o da loja", r.foto("-4-alfa"), r.textos(),
                                    tem=[f"CNPJ: {ALFA}", "confere com o da loja", "último número 60"],
                                    nao_tem=["diferente do informado em Loja", LOJA, FORNECEDOR])
+        finally:
+            r.fechar()
+        # N-3 da R8 (e B-4 da R7): sem o CNPJ da loja, uma pasta só de notas denegadas, de dois emitentes. A pergunta
+        # diz "só notas denegadas" em cada emitente (antes: "CNPJ · 0 notas"); escolhida a loja, a série mostra o
+        # número gasto pelas denegadas.
+        for nome in os.listdir(notas):
+            os.remove(os.path.join(notas, nome))
+        denegada = lambda cnpj, n: nfce(cnpj, n, 1).replace("<cStat>100</cStat>", "<cStat>302</cStat>")  # noqa: E731
+        for nome, conteudo in [("loja-43.xml", denegada(LOJA, 43)), ("loja-44.xml", denegada(LOJA, 44)),
+                               ("compra-9.xml", denegada(FORNECEDOR, 9))]:
+            with open(os.path.join(notas, nome), "w", encoding="utf-8") as f:
+                f.write(conteudo)
+        imp.por_fora(pasta, "DELETE FROM config WHERE chave = 'loja_cnpj';")
+        r = nav.Rustinho(pasta, "TelaConfiguracoes", {"secao": "fiscal"}, fotos, "fis-descoberta-denegadas", casa)
+        try:
+            r.entrar("Ana")
+            time.sleep(3)
+            abrir_descoberta(r)
+            if not r.esperar("Qual destes CNPJ é o da loja?", 20):
+                raise RuntimeError(f"a descoberta só de denegadas não perguntou qual é a loja (foto {r.foto('-instr7')})")
+            tudo_certo &= conferir("N-3 (R8): só denegadas, dois emitentes: a pergunta diz \"só notas denegadas\"",
+                                   r.foto("-5-denegadas"), r.textos(),
+                                   tem=["Só notas denegadas, de 2 emitentes", f"{LOJA} · só notas denegadas (2)",
+                                        f"{FORNECEDOR} · só notas denegadas (1)"],
+                                   nao_tem=[f"{LOJA} · 0 notas", f"{FORNECEDOR} · 0 notas", "0 notas autorizadas lidas"])
+            if not clicar_na_linha(r, f"{LOJA} · só notas denegadas", "É o da loja"):
+                raise RuntimeError(f"não achei o É o da loja nas denegadas (foto {r.foto('-instr8')})")
+            if not r.esperar("Séries usadas", 15):
+                raise RuntimeError(f"a descoberta das denegadas não leu de novo (foto {r.foto('-instr9')})")
+            tudo_certo &= conferir("B-4 (R7): a série só de denegadas mostra o número gasto", r.foto("-6-denegadas"),
+                                   r.textos(),
+                                   tem=["último número 44 · só notas denegadas (o número delas foi gasto)",
+                                        "a próxima nota do Rustinho sai depois da 44"],
+                                   nao_tem=["Qual destes CNPJ é o da loja?", FORNECEDOR])
         finally:
             r.fechar()
     finally:

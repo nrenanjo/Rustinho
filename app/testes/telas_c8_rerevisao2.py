@@ -590,7 +590,15 @@ def s6_i1_tres_caixas(placar, fotos):
             r.clicar("Ver encomendas")
             chegou = r.esperar(lambda: r.tem("Correia dentada") and r.pilha() == inicio + 1)
             xdo("mousemove", "1400", "950")  # o ponteiro fora da janela: nenhuma linha com o mouse em cima
-            time.sleep(1.2)
+            # T029 da 005 (26/11): a foto "com" esperava 1,2 s fixos depois da chegada. Com a máquina carregada (a
+            # bateria e as rodadas com várias telas), o destaque chegava depois da foto: a foto saía sem véu e com as
+            # ações na linha da Pastilha, e a "sem" (9 s depois) também: razões 1,0 (a base 4c11b9b, sozinha, deu
+            # 0,87). Agora a foto espera o que o programa diz: destaque ativo e nada se movendo (como
+            # no telas_c8_rerevisao, r2), até 30 s, o limite da s4. A medida (a faixa 0,83–0,93) não muda.
+            espera = time.time()
+            assentou = r.esperar(lambda: rr.guia_assentada(r.textos()), 30)
+            print(f"MEDIDA s6: o destaque assentado {time.time() - espera:.1f} s depois da chegada ({assentou})",
+                  flush=True)
             com = r.foto("-2")
             ok("s6 (I1): Ver encomendas leva a Estoque › Encomendas, com a do outro caixa à vista", chegou, com)
             linha = textos_com(r, "Cliente do Caixa 2")
@@ -615,12 +623,15 @@ def s6_i1_tres_caixas(placar, fotos):
             obs("s6 S-4: textos da linha escolhida:", [(p[4], [round(v) for v in p[:4]]) for p in da_linha])
             ok("s6 (S-4): na linha escolhida, nenhum texto fica por cima de outro",
                len(da_linha) >= 3 and not cobertos, f"{com} {cobertos[:3]}")
-            time.sleep(9)
+            # "Acaba sozinho": o programa diz que o destaque acabou (6 s depois da chegada, `fimDoDestaque`); até 20 s.
+            acabou = r.esperar(lambda: "TESTE_DESTAQUE_ATIVO:0" in {t for _, _, t in r.textos()}, 20)
+            time.sleep(0.6)  # o esmaecer do véu (Tema.duracaoEsmaecer, até 220 ms) termina antes da foto
             sem = r.foto("-3")
             q = razoes(com, sem)
             obs("s6 I4, sem guia: margem com o destaque / sem:", q)
             ok("s6 (I4): sem guia, o véu do destaque é o leve (a margem a ~0,87 da luz sem véu) e acaba sozinho",
-               all(0.83 <= v <= 0.93 for v in q), f"{com} razões={q}")
+               assentou and acabou and all(0.83 <= v <= 0.93 for v in q),
+               f"{com} assentou={assentou} acabou={acabou} razões={q}")
             xdo("key", "Escape")
             ok("s6: o Esc volta ao Início, sem empilhar", r.esperar(lambda: r.pilha() == inicio), r.foto("-4"))
             ok("s6: nenhuma encomenda mudou", situacao() == antes)

@@ -88,7 +88,6 @@ pub fn estado_da_resposta(origem: Origem, cstat: &str) -> &'static str {
     let rejeicao = (100..=9999).contains(&n)
         && !RESULTADOS_DO_PROCESSAMENTO.contains(&n)
         && !REJEICAO_NAO_CONCLUSIVA.contains(&n)
-        // os de autorização e denegação com zero à esquerda ("0100") não são rejeição
         // B-5 da R7: os de autorização e denegação com zero à esquerda ("0100", "0301") não são rejeição; a lista é a das
         // funções únicas do `nfe_xml`.
         && !crate::nfe_xml::cstat_autorizado(&n.to_string())

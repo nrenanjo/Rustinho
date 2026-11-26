@@ -494,6 +494,11 @@ fn guardada(conn: &Connection, id: &str) -> Resultado<Guardada> {
 
 /// Outra regra do mesmo estado e CEST vale em algum dia do período? (Duas
 /// regras para a mesma combinação não podem valer no mesmo dia.)
+/// Se a linha com este id está no banco.
+fn existe_regra(conn: &Connection, id: &str) -> Resultado<bool> {
+    Ok(conn.query_row("SELECT COUNT(*) > 0 FROM regra_st WHERE id = ?1", [id], |l| l.get(0))?)
+}
+
 fn sobreposta(conn: &Connection, id: &str, uf: &str, cest: &str, de: &str, ate: Option<&str>) -> Resultado<bool> {
     let fim = ate.unwrap_or("9999-12-31");
     Ok(conn.query_row(
@@ -761,8 +766,53 @@ fn aplicar_catalogo(tx: &Connection, catalogo: &Catalogo) -> Resultado<usize> {
         .filter(|l| !l.trim().is_empty())
         .map(str::to_string)
         .collect();
+    // N-1 da R8: as retiradas vêm ANTES das regras. Assim, quando uma versão troca o id de uma regra no mesmo estado
+    // e CEST (sai a X, entra a Y), a linha velha X sai primeiro e não "sobrepõe" a Y (antes, a Y era pulada pela X e
+    // depois a X saía: o estado ficava sem regra e sem aviso).
+    // C-2 da R6: a retirada não vale para um id que voltou ao catálogo (retirado numa versão e reposto noutra).
+    let vivas: std::collections::HashSet<&str> = catalogo.regras.iter().map(|r| r.id.as_str()).collect();
+    // Os pares (estado, CEST) cujo aviso de "não entrou" foi limpo aqui: o aviso de uma regra viva do mesmo par é
+    // refeito abaixo, se ela continua de fora (N-1 da R8).
+    let mut limpos: Vec<(String, String)> = Vec::new();
+    for r in catalogo.retiradas.iter().filter(|r| r.na_versao > aplicada && !vivas.contains(r.id.as_str())) {
+        // C-3 da R6: o registro diz a UF, o CEST e a regra, e não o id interno.
+        let antes: Option<(String, String, String)> = tx
+            .query_row(
+                "SELECT uf, cest_inicio, descricao FROM regra_st WHERE id = ?1 AND origem = 'rustinho'",
+                [&r.id],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+            )
+            .optional()?;
+        // C-4 da R6 e B-1 da R7: o aviso de "não entrou" sobre a regra retirada sai, mesmo se a linha nunca entrou
+        // (o estado e o CEST da retirada; sem eles, os da linha do banco).
+        let par = if !r.uf.is_empty() && !r.cest_inicio.is_empty() {
+            Some((r.uf.clone(), r.cest_inicio.clone()))
+        } else {
+            antes.as_ref().map(|(uf, cest, _)| (uf.clone(), cest.clone()))
+        };
+        if let Some((uf, cest)) = par {
+            let marca = format!("{uf} CEST {cest} (");
+            puladas.retain(|p| !p.starts_with(&marca));
+            limpos.push((uf, cest));
+        }
+        let Some((uf, cest, descricao)) = antes else { continue };
+        tx.execute("DELETE FROM regra_st WHERE id = ?1 AND origem = 'rustinho'", [&r.id])?;
+        corrigidas.push(format!("{uf} CEST {cest}: regra do programa retirada ({descricao})"));
+    }
     for r in catalogo.regras.iter() {
         let versao_da_linha = r.versao_da_linha.max(r.desde_versao);
+        let refazer_aviso = r.desde_versao <= aplicada
+            && limpos.iter().any(|(uf, cest)| *uf == r.uf && *cest == r.cest_inicio)
+            && !existe_regra(tx, &r.id)?;
+        if refazer_aviso && sobreposta(tx, &r.id, &r.uf, &r.cest_inicio, &r.vigente_de, r.vigente_ate.as_deref())? {
+            let aviso = format!(
+                "{} CEST {} ({}): a loja já tem regra própria no mesmo período",
+                r.uf, r.cest_inicio, r.descricao
+            );
+            if !puladas.contains(&aviso) {
+                puladas.push(aviso);
+            }
+        }
         if r.desde_versao > aplicada {
             if sobreposta(tx, &r.id, &r.uf, &r.cest_inicio, &r.vigente_de, r.vigente_ate.as_deref())? {
                 // C-M6 da R1: a pulada não some em silêncio.
@@ -824,28 +874,6 @@ fn aplicar_catalogo(tx: &Connection, catalogo: &Catalogo) -> Resultado<usize> {
                 corrigidas.push(format!("{} CEST {}: {}", r.uf, r.cest_inicio, r.descricao));
             }
         }
-    }
-    // C-2 da R6: a retirada não vale para um id que voltou ao catálogo (retirado numa versão e reposto noutra).
-    let vivas: std::collections::HashSet<&str> = catalogo.regras.iter().map(|r| r.id.as_str()).collect();
-    for r in catalogo.retiradas.iter().filter(|r| r.na_versao > aplicada && !vivas.contains(r.id.as_str())) {
-        // C-3 da R6: o registro diz a UF, o CEST e a regra, e não o id interno.
-        let antes: Option<(String, String, String)> = tx
-            .query_row(
-                "SELECT uf, cest_inicio, descricao FROM regra_st WHERE id = ?1 AND origem = 'rustinho'",
-                [&r.id],
-                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
-            )
-            .optional()?;
-        // C-4 da R6 e B-1 da R7: o aviso de "não entrou" sobre a regra retirada sai, mesmo se a linha nunca entrou.
-        if !r.uf.is_empty() && !r.cest_inicio.is_empty() {
-            let marca = format!("{} CEST {} (", r.uf, r.cest_inicio);
-            puladas.retain(|p| !p.starts_with(&marca));
-        }
-        let Some((uf, cest, descricao)) = antes else { continue };
-        tx.execute("DELETE FROM regra_st WHERE id = ?1 AND origem = 'rustinho'", [&r.id])?;
-        corrigidas.push(format!("{uf} CEST {cest}: regra do programa retirada ({descricao})"));
-        let marca = format!("{uf} CEST {cest} (");
-        puladas.retain(|p| !p.starts_with(&marca));
     }
     if !corrigidas.is_empty() {
         let disp = config::ler(tx, "dispositivo_id")?.unwrap_or_default();
@@ -1682,6 +1710,86 @@ mod testes {
         .unwrap();
         crate::sync::sem_registrar(&b.conn, |tx| aplicar_catalogo(tx, &cat)).unwrap();
         assert!(conferir(&b.conn, "2026-11-26").unwrap().regras_puladas.is_empty(), "o aviso da regra retirada saiu");
+    }
+
+    /// N-1 e N-2 da R8: a limpeza do aviso pega só a regra retirada, e a troca do id no mesmo estado e CEST não deixa
+    /// o estado sem regra nem sem aviso.
+    #[test]
+    fn r8_n1_n2_retirada_nao_atinge_regra_viva() {
+        let regra = |id: &str, uf: &str, cest: &str, desde: i64| {
+            serde_json::json!({ "id": id, "uf": uf, "cestInicio": cest, "vigenteDe": "2026-01-01", "vigenteAte": null,
+                                "comSt": true, "descricao": id, "fonte": "f", "dispositivo": "d",
+                                "consultadaEm": "2026-11-26", "desdeVersao": desde, "versaoDaLinha": desde })
+        };
+        let puladas = |b: &Banco| -> Vec<String> {
+            config::ler(&b.conn, CHAVE_PULADAS).unwrap().unwrap_or_default().lines().map(str::to_string).collect()
+        };
+        // (N-2) Os avisos de outro CEST que começa com o retirado e de outro estado com o mesmo CEST ficam; o da
+        // retirada de outro estado (SC 0109) sai também (a marca usa o estado da retirada, e não um fixo).
+        let b = Banco::em_memoria().unwrap();
+        let outros = [
+            "PR CEST 010800 (y): a loja já tem regra própria no mesmo período",
+            "SC CEST 0108 (z): a loja já tem regra própria no mesmo período",
+        ];
+        config::gravar(
+            &b.conn,
+            CHAVE_PULADAS,
+            &format!(
+                "PR CEST 0108 (x): a loja já tem regra própria no mesmo período\n{}\n\
+                 SC CEST 0109 (w): a loja já tem regra própria no mesmo período",
+                outros.join("\n")
+            ),
+        )
+        .unwrap();
+        config::gravar(&b.conn, CHAVE_CATALOGO, "5").unwrap();
+        let cat: Catalogo = serde_json::from_value(serde_json::json!({
+            "versao": 6, "regras": [],
+            "retiradas": [{ "id": "pr-autopecas-0108-sem-st", "naVersao": 6, "uf": "PR", "cestInicio": "0108" },
+                          { "id": "sc-0109", "naVersao": 6, "uf": "SC", "cestInicio": "0109" }]
+        }))
+        .unwrap();
+        crate::sync::sem_registrar(&b.conn, |tx| aplicar_catalogo(tx, &cat)).unwrap();
+        assert_eq!(puladas(&b), outros.to_vec(), "só os avisos das regras retiradas saem");
+        // (N-1, E10) O id trocado no mesmo estado e CEST: sai a X, entra a Y (antes, a X "sobrepunha" a Y, que era
+        // pulada, e depois a X saía: o AL ficava sem regra e sem aviso).
+        let b = Banco::em_memoria().unwrap();
+        b.conn
+            .execute(
+                "INSERT INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, origem)
+                 VALUES ('x-velha', 'AL', '98', '2026-01-01', NULL, 1, 'x-velha', 'rustinho')",
+                [],
+            )
+            .unwrap();
+        config::gravar(&b.conn, CHAVE_CATALOGO, "5").unwrap();
+        let cat: Catalogo = serde_json::from_value(serde_json::json!({
+            "versao": 7, "regras": [regra("y-nova", "AL", "98", 7)],
+            "retiradas": [{ "id": "x-velha", "naVersao": 7, "uf": "AL", "cestInicio": "98" }]
+        }))
+        .unwrap();
+        crate::sync::sem_registrar(&b.conn, |tx| aplicar_catalogo(tx, &cat)).unwrap();
+        let ids: Vec<String> = regras(&b.conn).unwrap().into_iter().filter(|r| r.uf == "AL").map(|r| r.id).collect();
+        assert_eq!(ids, vec!["y-nova".to_string()], "a nova entra no lugar da velha");
+        assert!(puladas(&b).is_empty(), "{:?}", puladas(&b));
+        // (N-1, E4) Uma regra viva antiga do mesmo estado e CEST, que continua de fora (a loja tem a dela), fica com o
+        // aviso, mesmo com a retirada de outra regra daquele par.
+        let b = Banco::em_memoria().unwrap();
+        b.conn
+            .execute(
+                "INSERT INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, origem)
+                 VALUES ('da-loja', 'AL', '97', '2025-01-01', NULL, 0, 'da loja', 'loja')",
+                [],
+            )
+            .unwrap();
+        let aviso = "AL CEST 97 (z-viva): a loja já tem regra própria no mesmo período";
+        config::gravar(&b.conn, CHAVE_PULADAS, aviso).unwrap();
+        config::gravar(&b.conn, CHAVE_CATALOGO, "5").unwrap();
+        let cat: Catalogo = serde_json::from_value(serde_json::json!({
+            "versao": 7, "regras": [regra("z-viva", "AL", "97", 3)],
+            "retiradas": [{ "id": "x-retirada", "naVersao": 7, "uf": "AL", "cestInicio": "97" }]
+        }))
+        .unwrap();
+        crate::sync::sem_registrar(&b.conn, |tx| aplicar_catalogo(tx, &cat)).unwrap();
+        assert_eq!(puladas(&b), vec![aviso.to_string()], "o aviso da regra viva fica");
     }
 
     /// N-1 da R5: a linha do programa retirada numa versão sai do banco que aplicou a versão anterior; a que a loja mudou

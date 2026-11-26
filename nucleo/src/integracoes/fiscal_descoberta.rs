@@ -54,7 +54,8 @@ pub struct Descoberta {
     /// Alguma nota da loja usa o QR Code versão 3 (sem CSC).
     pub qr_versao_3: bool,
     pub series: Vec<Serie>,
-    /// Sem o CNPJ da loja e com mais de um emitente: os emitentes achados (CNPJ e quantas notas), para a tela
+    /// Sem o CNPJ da loja e com mais de um emitente: os emitentes achados (CNPJ, quantas autorizadas e quantas
+    /// denegadas), para a tela
     /// perguntar qual é a loja. Enquanto isso, nenhum dado sai.
     pub candidatos: Vec<Candidato>,
     /// Quantos XML foram lidos como notas autorizadas da loja.
@@ -67,7 +68,10 @@ pub struct Descoberta {
 #[serde(rename_all = "camelCase")]
 pub struct Candidato {
     pub cnpj: String,
+    /// As autorizadas (C-6 da R6).
     pub notas: i64,
+    /// N-3 da R8: as denegadas, para a tela não mostrar "0 notas" de um emitente que só tem denegadas.
+    pub denegadas: i64,
 }
 
 struct Nota {
@@ -194,7 +198,11 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
             }
         }
         if conta.len() > 1 {
-            let mut c: Vec<Candidato> = conta.into_iter().map(|(cnpj, notas)| Candidato { cnpj, notas }).collect();
+            let denegadas = |cnpj: &str| {
+                notas.iter().filter(|n| n.denegada && crate::documento::limpar(&n.cnpj) == cnpj).count() as i64
+            };
+            let mut c: Vec<Candidato> =
+                conta.into_iter().map(|(cnpj, notas)| Candidato { denegadas: denegadas(&cnpj), cnpj, notas }).collect();
             c.sort_by(|a, b| b.notas.cmp(&a.notas).then(a.cnpj.cmp(&b.cnpj)));
             d.candidatos = c;
             return d;
@@ -472,10 +480,37 @@ mod testes {
         assert_eq!(
             d.candidatos,
             vec![
-                Candidato { cnpj: "11222333000181".into(), notas: 2 },
-                Candidato { cnpj: "99888777000166".into(), notas: 1 }
+                Candidato { cnpj: "11222333000181".into(), notas: 2, denegadas: 1 },
+                Candidato { cnpj: "99888777000166".into(), notas: 1, denegadas: 0 }
             ]
         );
+    }
+
+    /// N-3 da R8: dois emitentes só com notas denegadas: os dois viram candidatos, com 0 autorizadas e as denegadas
+    /// contadas (a tela diz "só notas denegadas", e não "0 notas"); nenhum dado sai antes da escolha.
+    #[test]
+    fn r8_n3_dois_emitentes_so_denegadas() {
+        let denegada = |n: i64, cnpj: &str| {
+            nfce(n, 1, "000001", "1")
+                .replace("<cStat>100</cStat>", "<cStat>302</cStat>")
+                .replace("11222333000181", cnpj)
+        };
+        let d = descobrir_de_xml(
+            &[
+                ("a.xml".into(), denegada(41, "11222333000181")),
+                ("b.xml".into(), denegada(42, "11222333000181")),
+                ("c.xml".into(), denegada(7, "99888777000166")),
+            ],
+            "",
+        );
+        assert_eq!(
+            d.candidatos,
+            vec![
+                Candidato { cnpj: "11222333000181".into(), notas: 0, denegadas: 2 },
+                Candidato { cnpj: "99888777000166".into(), notas: 0, denegadas: 1 }
+            ]
+        );
+        assert!(d.series.is_empty() && d.cnpj.is_none() && d.lidas == 0, "nada sai antes da escolha: {d:?}");
     }
 
     /// C-8 da R5: a nota denegada gastou o número: entra no piso da série (o último número), mas não nos dados.
@@ -532,8 +567,8 @@ mod testes {
         assert_eq!(
             d.candidatos,
             vec![
-                Candidato { cnpj: "99888777000166".into(), notas: 2 },
-                Candidato { cnpj: "11222333000181".into(), notas: 1 }
+                Candidato { cnpj: "99888777000166".into(), notas: 2, denegadas: 0 },
+                Candidato { cnpj: "11222333000181".into(), notas: 1, denegadas: 0 }
             ]
         );
         assert!(d.cnpj.is_none() && d.crt.is_none() && d.series.is_empty() && d.lidas == 0);

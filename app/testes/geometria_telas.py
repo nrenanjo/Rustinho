@@ -230,7 +230,7 @@ def main():
             rr.foto("-rolada")
             largos = list(dict.fromkeys(largos))
             conferir("G4", "Fiscal no celular: nenhum texto mais largo que a tela", na_fiscal and not largos,
-                     f"na seção Fiscal: {na_fiscal}; {medidos} textos medidos (rolando); passam da borda: {largos[:3]}")
+                     f"na seção Fiscal: {na_fiscal}; {medidos} textos medidos (rolando); passam da borda ({len(largos)}): {largos}")
             if not na_fiscal:
                 resultados["G4"] = (False, "Fiscal no celular: NÃO MEDIDO (a seção Fiscal não abriu)", "")
                 ESPERADAS.pop("G4", None)

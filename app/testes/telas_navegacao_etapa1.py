@@ -107,6 +107,25 @@ def primeiro_xml(casa):
     return os.path.join(pasta, nomes[0])
 
 
+# A fonte que só as regras de ST do RS mostram (catálogo do programa).
+FONTE_RS = "Dec. 59.081/2026"
+
+
+def mostrar_regras_do_rs(r):
+    """Na lista "Estado" das regras de ST, troca do SP (o de início, sem UF na loja) para o RS: abre a lista e sobe
+    três (SP → SE → SC → RS, a ordem de `documento::UFS`)."""
+    if not r.clicar_visivel("Estado"):
+        return False
+    r.clicar_campo("Estado")
+    time.sleep(0.8)
+    for _ in range(3):
+        xdo("key", "Up")
+        time.sleep(0.2)
+    xdo("key", "Return")
+    time.sleep(1.2)
+    return r.esperar(FONTE_RS, 6)
+
+
 class Rustinho(nav.Rustinho):
     def __init__(self, pasta, tela, props, fotos, nome, casa):
         self.casa = casa
@@ -469,8 +488,12 @@ def main():
                 ok("F: a faixa do Fiscal pede UF e CNPJ", r.esperar("Para continuar, informe a UF e o CNPJ da loja"),
                    r.foto("-1"))
                 certo &= conferir("F: o que falta", r.foto("-1b"), r.textos(), tem=["Ir para Loja", "UF", "CNPJ"])
-                ok("F: adicionar uma regra de ST pendente", r.clicar_visivel("Adicionar regra"), r.foto("-1c-regra"))
-                ok("F: a regra de ST ficou pendente", r.tem("Salvar regras"), r.foto("-1d-regra-pendente"))
+                # Desde a 0.9.19, etapa 3 (FIS-P5): cada regra de ST se salva no painel dela, e não há mais regra
+                # "pendente" na tela (o "Adicionar regra"/"Salvar regras" saiu). O que a navegação guiada tem de
+                # preservar continua: o estado da tela Fiscal; aqui, o estado escolhido nas regras (RS, e não o SP
+                # de início), conferido pela fonte que só as regras do RS mostram.
+                ok("F: mostrar as regras do RS", mostrar_regras_do_rs(r), r.foto("-1c-regras-rs"))
+                ok("F: as regras do RS aparecem", r.tem(FONTE_RS), r.foto("-1d-regras-rs"))
                 profundidade = r.profundidade_pilha()
                 r.clicar_visivel("Ir para Loja")
                 ok("F: levou à Loja", r.esperar("volta para Fiscal"), r.foto("-2"))
@@ -483,7 +506,7 @@ def main():
                 ok("F: Esc desistiu e restaurou Fiscal", r.esperar("Ir para Loja"),
                    r.foto("-2c-desistiu"))
                 ok("F: desistir não empilhou outra tela", r.profundidade_pilha() == profundidade, r.foto("-2c-pilha"))
-                ok("F: desistir preservou a regra de ST pendente", r.tem("Salvar regras"), r.foto("-2c-regra"))
+                ok("F: desistir preservou o estado das regras (RS)", r.tem(FONTE_RS), r.foto("-2c-regra"))
                 r.clicar_visivel("Ir para Loja")
                 ok("F: reabriu Loja na mesma instância", r.esperar("volta para Fiscal"), r.foto("-2d-reabriu"))
                 ok("F: nova tentativa mantém a pilha", r.profundidade_pilha() == profundidade, r.foto("-2d-pilha"))
@@ -497,7 +520,7 @@ def main():
                 ok("F: descarte retorna ao Fiscal", r.esperar("Ir para Loja"),
                    r.foto("-2h-retorno-descarte"))
                 ok("F: descarte limpa o estado Não salvo", not r.tem("Não salvo"), r.foto("-2i-nao-salvo"))
-                ok("F: descarte preservou a regra de ST pendente", r.tem("Salvar regras"), r.foto("-2j-regra"))
+                ok("F: descarte preservou o estado das regras (RS)", r.tem(FONTE_RS), r.foto("-2j-regra"))
                 r.clicar_visivel("Ir para Loja")
                 ok("F: voltou à Loja depois do descarte", r.esperar("volta para Fiscal"), r.foto("-2k-reabriu"))
                 ok("F: descarte recarregou o nome persistido", not r.tem("TEMP-NAO-SALVAR"), r.foto("-2l-nome-recarregado"))
@@ -517,8 +540,8 @@ def main():
                 certo &= conferir("F: desistência atualiza o requisito pelo núcleo", r.foto("-3c-requisito-atualizado"),
                                   r.textos(), tem=["O CNPJ da loja ainda não está salvo."],
                                   nao_tem=["O estado (UF) da loja ainda não está salvo."], igual=["Fiscal"])
-                ok("F: regra de ST continua pendente após atualizar o Fiscal",
-                   r.tem("Salvar regras"), r.foto("-3d-regra-preservada"))
+                ok("F: o estado das regras (RS) continua após atualizar o Fiscal",
+                   r.tem(FONTE_RS), r.foto("-3d-regra-preservada"))
                 ok("F: desistência após salvar UF não empilhou tela",
                    r.profundidade_pilha() == profundidade, r.foto("-3e-pilha"))
                 r.clicar_visivel("Ir para Loja")
@@ -530,8 +553,8 @@ def main():
                 time.sleep(1.5)
                 certo &= conferir("F: a faixa some", r.foto("-4b"), r.textos(),
                                   tem=["CSOSN"], nao_tem=["Para continuar, informe a UF e o CNPJ da loja"])
-                ok("F: requisito satisfeito também preserva regra ST pendente",
-                   r.tem("Salvar regras"), r.foto("-4c-regra-preservada"))
+                ok("F: requisito satisfeito também preserva o estado das regras (RS)",
+                   r.tem(FONTE_RS), r.foto("-4c-regra-preservada"))
             finally:
                 r.fechar()
     finally:

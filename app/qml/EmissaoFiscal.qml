@@ -178,8 +178,10 @@ ColumnLayout {
                 }
             }
         }
+        // Bateria de 4ef0919 (geometria G4): o rótulo cabe no celular (o antigo, de 47 letras, alargava o quadro e os
+        // passos passavam da borda da tela).
         Botao {
-            text: "Trazer os dados das notas que a loja já emitiu"
+            text: "Ler as notas da loja"
             icone: "documento"
             tipo: "secundario"
             onClicked: seletorDescoberta.open()
@@ -218,8 +220,10 @@ ColumnLayout {
                 Nota {
                     text: !painelDescoberta.d ? ""
                           : painelDescoberta.d.candidatos.length > 0
-                            ? painelDescoberta.d.candidatos.reduce((t, c) => t + c.notas, 0) + " notas autorizadas lidas, de "
-                              + painelDescoberta.d.candidatos.length + " emitentes"
+                            ? (painelDescoberta.d.candidatos.reduce((t, c) => t + c.notas, 0) === 0
+                               ? "Só notas denegadas, de " + painelDescoberta.d.candidatos.length + " emitentes"
+                               : painelDescoberta.d.candidatos.reduce((t, c) => t + c.notas, 0) + " notas autorizadas lidas, de "
+                                 + painelDescoberta.d.candidatos.length + " emitentes")
                             : (painelDescoberta.d.lidas === 1 ? "1 nota autorizada lida" : painelDescoberta.d.lidas + " notas autorizadas lidas")
                           + (painelDescoberta.d.ignorados.length ? " · " + painelDescoberta.d.ignorados.length + " arquivos deixados de lado (não autorizados, de outro emitente ou sem leitura)" : "")
                           + ". Nada é gravado sem você confirmar."
@@ -249,8 +253,11 @@ ColumnLayout {
                         spacing: 10
                         Layout.fillWidth: true
                         Text {
-                            text: linhaCandidato.modelData.cnpj + " · " + linhaCandidato.modelData.notas
-                                  + (linhaCandidato.modelData.notas === 1 ? " nota" : " notas")
+                            // N-3 da R8: o emitente só com denegadas não aparece como "0 notas".
+                            text: linhaCandidato.modelData.cnpj + " · "
+                                  + (linhaCandidato.modelData.notas === 0
+                                     ? "só notas denegadas (" + linhaCandidato.modelData.denegadas + ")"
+                                     : linhaCandidato.modelData.notas + (linhaCandidato.modelData.notas === 1 ? " nota" : " notas"))
                             textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
