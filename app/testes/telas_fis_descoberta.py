@@ -7,7 +7,10 @@ de teste não tem CNPJ informado. O roteiro confere, pela janela de pasta do sis
 - com dois emitentes, o Rustinho não escolhe sozinho: pergunta "Qual destes CNPJ é o da loja?" e lista os dois;
 - escolhido o da loja, aparecem o regime, o identificador do CSC (e o aviso de que o CSC não está nas notas) e a
   série 1 com o último número 42 e a frase de que a próxima nota do Rustinho sai depois da 42;
-- "Usar esta série" grava a série da NFC-e e o piso da numeração (a 42) neste computador, com o registro.
+- "Usar esta série" grava a série da NFC-e e o piso da numeração (a 42) neste computador, com o registro;
+- C-1 (R4): a loja com CNPJ alfanumérico confere com a nota dela;
+- N-3 (R8) e B-4 (R7): uma pasta só de notas denegadas, de dois emitentes: a pergunta diz "só notas denegadas" (e não
+  "0 notas"), e a série da loja mostra o número gasto pelas denegadas.
 
     python3 app/testes/telas_fis_descoberta.py [pasta para as fotos]
 """
@@ -69,7 +72,7 @@ def clicar_na_linha(r, texto_da_linha, botao):
 
 
 def abrir_descoberta(r):
-    """Clica "Trazer os dados…", sobe para Documents na janela de pasta do sistema e abre (lê ela e as subpastas)."""
+    """Clica "Ler as notas da loja", sobe para Documents na janela de pasta do sistema e abre (lê ela e as subpastas)."""
     if not clicar_rolando(r, "Ler as notas da loja"):
         raise RuntimeError(f"não achei o botão da descoberta (veja {r.saida})")
     time.sleep(2)
@@ -186,7 +189,7 @@ def main():
             tudo_certo &= conferir("N-3 (R8): só denegadas, dois emitentes: a pergunta diz \"só notas denegadas\"",
                                    r.foto("-5-denegadas"), r.textos(),
                                    tem=["Só notas denegadas, de 2 emitentes", f"{LOJA} · só notas denegadas (2)",
-                                        f"{FORNECEDOR} · só notas denegadas (1)"],
+                                        f"{FORNECEDOR} · só 1 nota denegada", "Nada é gravado sem você confirmar."],
                                    nao_tem=[f"{LOJA} · 0 notas", f"{FORNECEDOR} · 0 notas", "0 notas autorizadas lidas"])
             if not clicar_na_linha(r, f"{LOJA} · só notas denegadas", "É o da loja"):
                 raise RuntimeError(f"não achei o É o da loja nas denegadas (foto {r.foto('-instr8')})")

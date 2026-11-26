@@ -190,12 +190,12 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
         for n in notas.iter().filter(|n| !n.denegada) {
             *conta.entry(crate::documento::limpar(&n.cnpj)).or_default() += 1;
         }
-        // B-4 da R7: sem nenhuma autorizada, o emitente das denegadas é o candidato (com 0 autorizadas), para o número
-        // gasto delas virar o piso; com mais de um emitente, a tela pergunta, como sempre.
-        if conta.is_empty() {
-            for n in &notas {
-                conta.entry(crate::documento::limpar(&n.cnpj)).or_default();
-            }
+        // B-4 da R7 e E6 da R8 (T030): todo emitente da pasta é candidato, também o que só tem denegadas (com 0
+        // autorizadas). Só com um emitente ele é a loja; com mais de um, a tela pergunta. Antes, o emitente só de
+        // denegadas ficava de fora quando havia autorizadas de outro: uma denegada da loja com notas de compra de um
+        // fornecedor fazia o fornecedor virar "a loja" sem perguntar.
+        for n in &notas {
+            conta.entry(crate::documento::limpar(&n.cnpj)).or_default();
         }
         if conta.len() > 1 {
             let denegadas = |cnpj: &str| {
@@ -484,6 +484,26 @@ mod testes {
                 Candidato { cnpj: "99888777000166".into(), notas: 1, denegadas: 0 }
             ]
         );
+    }
+
+    /// E6 da R8 (T030): sem o CNPJ da loja, uma denegada da loja e autorizadas de um fornecedor: a tela pergunta qual é
+    /// a loja (antes, o fornecedor virava "a loja" sozinho, e os dados dele sairiam como os da loja).
+    #[test]
+    fn t030_e6_denegada_da_loja_e_autorizadas_de_fornecedor_pergunta() {
+        let denegada = nfce(45, 1, "000001", "1").replace("<cStat>100</cStat>", "<cStat>302</cStat>");
+        let fornecedor = |n: i64| nfce(n, 1, "000001", "3").replace("11222333000181", "99888777000166");
+        let d = descobrir_de_xml(
+            &[("a.xml".into(), denegada), ("b.xml".into(), fornecedor(7)), ("c.xml".into(), fornecedor(8))],
+            "",
+        );
+        assert_eq!(
+            d.candidatos,
+            vec![
+                Candidato { cnpj: "99888777000166".into(), notas: 2, denegadas: 0 },
+                Candidato { cnpj: "11222333000181".into(), notas: 0, denegadas: 1 }
+            ]
+        );
+        assert!(d.cnpj.is_none() && d.crt.is_none() && d.series.is_empty(), "nada sai antes da escolha: {d:?}");
     }
 
     /// N-3 da R8: dois emitentes só com notas denegadas: os dois viram candidatos, com 0 autorizadas e as denegadas

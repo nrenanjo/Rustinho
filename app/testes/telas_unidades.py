@@ -138,14 +138,24 @@ class Rustinho(tema.Rustinho):
         self.p = subprocess.Popen(args + ["--abrir", tela, "--props", json.dumps(props)],
                                   env=env, stdout=self.log, stderr=self.log)
         self.conferir_ambiente()
+        # T030 da 005 (bateria de 419e3fb, telas_juntar_h24): antes, só no celular o roteiro esperava a janela. No
+        # computador, o primeiro pedido dos textos (o atalho ctrl+shift+F12) podia sair antes de a janela existir, com
+        # a máquina carregada: a tecla se perdia e `textos` desistia em 10 s ("o Rustinho não escreveu os textos da
+        # tela"; o registro do programa só tinha a linha do Qt). Agora todo roteiro espera o que o programa mostra (a
+        # janela visível), até 60 s; se ela não aparece, o erro diz isso, e não "não escreveu os textos".
+        fim = time.monotonic() + 60.0
+        while True:
+            if self.p.poll() is not None:
+                raise RuntimeError(f"o Rustinho fechou antes de abrir a janela (veja {self.saida})")
+            s = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "rustinho"],
+                               env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+            if s.stdout.split():
+                break
+            if time.monotonic() > fim:
+                raise RuntimeError(f"a janela do Rustinho não apareceu em 60 s (veja {self.saida})")
+            time.sleep(0.2)
         if celular:
             # Em pé, do tamanho de um celular (como o roteiro do toque).
-            for _ in range(150):
-                s = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "rustinho"],
-                                   env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
-                if s.stdout.split():
-                    break
-                time.sleep(0.2)
             time.sleep(0.5)
             self.redimensionar(360, 780)
             time.sleep(1)

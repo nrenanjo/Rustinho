@@ -492,13 +492,13 @@ fn guardada(conn: &Connection, id: &str) -> Resultado<Guardada> {
     .ok_or_else(|| Erro::NaoEncontrado("Regra de ST".into()))
 }
 
-/// Outra regra do mesmo estado e CEST vale em algum dia do período? (Duas
-/// regras para a mesma combinação não podem valer no mesmo dia.)
 /// Se a linha com este id está no banco.
 fn existe_regra(conn: &Connection, id: &str) -> Resultado<bool> {
     Ok(conn.query_row("SELECT COUNT(*) > 0 FROM regra_st WHERE id = ?1", [id], |l| l.get(0))?)
 }
 
+/// Outra regra do mesmo estado e CEST vale em algum dia do período? (Duas
+/// regras para a mesma combinação não podem valer no mesmo dia.)
 fn sobreposta(conn: &Connection, id: &str, uf: &str, cest: &str, de: &str, ate: Option<&str>) -> Resultado<bool> {
     let fim = ate.unwrap_or("9999-12-31");
     Ok(conn.query_row(
@@ -1790,6 +1790,22 @@ mod testes {
         .unwrap();
         crate::sync::sem_registrar(&b.conn, |tx| aplicar_catalogo(tx, &cat)).unwrap();
         assert_eq!(puladas(&b), vec![aviso.to_string()], "o aviso da regra viva fica");
+        // (B-2 da R9) A regra viva antiga do mesmo par, que NÃO se sobrepõe mais (a regra da loja acabou antes do
+        // começo dela), não ganha o aviso de volta: o aviso só volta para quem continua de fora por sobreposição.
+        let b = Banco::em_memoria().unwrap();
+        b.conn
+            .execute(
+                "INSERT INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, origem)
+                 VALUES ('da-loja', 'AL', '97', '2024-01-01', '2024-12-31', 0, 'da loja', 'loja')",
+                [],
+            )
+            .unwrap();
+        config::gravar(&b.conn, CHAVE_PULADAS, aviso).unwrap();
+        config::gravar(&b.conn, CHAVE_CATALOGO, "5").unwrap();
+        crate::sync::sem_registrar(&b.conn, |tx| aplicar_catalogo(tx, &cat)).unwrap();
+        assert!(puladas(&b).is_empty(), "sem sobreposição, sem aviso: {:?}", puladas(&b));
+        // E a regra da loja continua no banco (a retirada nunca apaga a da loja).
+        assert!(existe_regra(&b.conn, "da-loja").unwrap());
     }
 
     /// N-1 da R5: a linha do programa retirada numa versão sai do banco que aplicou a versão anterior; a que a loja mudou

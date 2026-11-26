@@ -623,8 +623,14 @@ def s6_i1_tres_caixas(placar, fotos):
             obs("s6 S-4: textos da linha escolhida:", [(p[4], [round(v) for v in p[:4]]) for p in da_linha])
             ok("s6 (S-4): na linha escolhida, nenhum texto fica por cima de outro",
                len(da_linha) >= 3 and not cobertos, f"{com} {cobertos[:3]}")
-            # "Acaba sozinho": o programa diz que o destaque acabou (6 s depois da chegada, `fimDoDestaque`); até 20 s.
+            # "Acaba sozinho": o programa diz que o destaque acabou (6 s depois da chegada, `fimDoDestaque`). B-3 da R9:
+            # a duração é medida e tem teto (12 s desde o assentar: os 6 s do programa com folga para a carga); um
+            # destaque que não some, ou que dura o dobro, reprova.
+            antes_do_fim = time.time()
             acabou = r.esperar(lambda: "TESTE_DESTAQUE_ATIVO:0" in {t for _, _, t in r.textos()}, 20)
+            duracao = time.time() - antes_do_fim
+            print(f"MEDIDA s6: o destaque acabou {duracao:.1f} s depois de assentar ({acabou})", flush=True)
+            acabou = acabou and duracao <= 12.0
             time.sleep(0.6)  # o esmaecer do véu (Tema.duracaoEsmaecer, até 220 ms) termina antes da foto
             sem = r.foto("-3")
             q = razoes(com, sem)

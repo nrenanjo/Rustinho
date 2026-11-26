@@ -179,7 +179,14 @@ ColumnLayout {
             }
         }
         // Bateria de 4ef0919 (geometria G4): o rótulo cabe no celular (o antigo, de 47 letras, alargava o quadro e os
-        // passos passavam da borda da tela).
+        // passos passavam da borda da tela). B-6 da R9 (U1): a frase ao lado diz o que o botão faz, o que o rótulo curto
+        // deixou de dizer.
+        Nota {
+            text: "Para preencher estes dados, o Rustinho pode ler os arquivos XML das notas que a loja já emitiu pelo "
+                  + "sistema de hoje. Nada é gravado sem você confirmar."
+            font.pixelSize: 14
+            Layout.fillWidth: true
+        }
         Botao {
             text: "Ler as notas da loja"
             icone: "documento"
@@ -219,12 +226,14 @@ ColumnLayout {
                 Titulo { text: "O que achei nas notas da loja"; font.pixelSize: 26; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 Nota {
                     text: !painelDescoberta.d ? ""
-                          : painelDescoberta.d.candidatos.length > 0
-                            ? (painelDescoberta.d.candidatos.reduce((t, c) => t + c.notas, 0) === 0
-                               ? "Só notas denegadas, de " + painelDescoberta.d.candidatos.length + " emitentes"
-                               : painelDescoberta.d.candidatos.reduce((t, c) => t + c.notas, 0) + " notas autorizadas lidas, de "
-                                 + painelDescoberta.d.candidatos.length + " emitentes")
-                            : (painelDescoberta.d.lidas === 1 ? "1 nota autorizada lida" : painelDescoberta.d.lidas + " notas autorizadas lidas")
+                          // B-6 da R9: com ou sem a pergunta, o resumo termina igual (antes, pela precedência do "?:", o
+                          // ramo dos candidatos ficava sem o ponto e sem "Nada é gravado sem você confirmar").
+                          : (painelDescoberta.d.candidatos.length > 0
+                             ? (painelDescoberta.d.candidatos.reduce((t, c) => t + c.notas, 0) === 0
+                                ? "Só notas denegadas, de " + painelDescoberta.d.candidatos.length + " emitentes"
+                                : painelDescoberta.d.candidatos.reduce((t, c) => t + c.notas, 0) + " notas autorizadas lidas, de "
+                                  + painelDescoberta.d.candidatos.length + " emitentes")
+                             : (painelDescoberta.d.lidas === 1 ? "1 nota autorizada lida" : painelDescoberta.d.lidas + " notas autorizadas lidas"))
                           + (painelDescoberta.d.ignorados.length ? " · " + painelDescoberta.d.ignorados.length + " arquivos deixados de lado (não autorizados, de outro emitente ou sem leitura)" : "")
                           + ". Nada é gravado sem você confirmar."
                     font.pixelSize: 14
@@ -256,7 +265,8 @@ ColumnLayout {
                             // N-3 da R8: o emitente só com denegadas não aparece como "0 notas".
                             text: linhaCandidato.modelData.cnpj + " · "
                                   + (linhaCandidato.modelData.notas === 0
-                                     ? "só notas denegadas (" + linhaCandidato.modelData.denegadas + ")"
+                                     ? (linhaCandidato.modelData.denegadas === 1 ? "só 1 nota denegada"
+                                        : "só notas denegadas (" + linhaCandidato.modelData.denegadas + ")")
                                      : linhaCandidato.modelData.notas + (linhaCandidato.modelData.notas === 1 ? " nota" : " notas"))
                             textFormat: Text.PlainText
                             color: Tema.tinta

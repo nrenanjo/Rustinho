@@ -20,8 +20,9 @@ pela cor dos pixels (o escurecimento). Usa as peças do teste do piloto
      loja não muda.
   E. Compras como caixa: pede a senha do gerente antes e de novo ao salvar.
   F. Fiscal sem UF e CNPJ: testa desistência, descarte de alterações da Loja,
-     atualização do requisito após salvar só a UF e preservação de regra de ST
-     pendente; com UF e CNPJ, volta ao Fiscal e a faixa some.
+     atualização do requisito após salvar só a UF e preservação do estado da
+     tela Fiscal (as regras de ST do RS escolhidas, e não as do SP de início);
+     com UF e CNPJ, volta ao Fiscal e a faixa some.
 
     python3 app/testes/telas_navegacao_etapa1.py [pasta para as fotos]
     RUSTINHO_TELA=:88 python3 app/testes/telas_navegacao_etapa1.py   (se a :84 estiver ocupada)
@@ -107,8 +108,23 @@ def primeiro_xml(casa):
     return os.path.join(pasta, nomes[0])
 
 
-# A fonte que só as regras de ST do RS mostram (catálogo do programa).
-FONTE_RS = "Dec. 59.081/2026"
+def fonte_so_do_rs():
+    """B-4 da R9: uma fonte que só as regras de ST do RS mostram, tirada do catálogo do programa (e não um texto fixo:
+    quando o catálogo mudar, o roteiro acompanha). SP, o estado de início, não pode ter essa fonte."""
+    import json
+    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "nucleo", "src", "catalogo",
+                           "regras_st_programa.json")
+    with open(caminho, encoding="utf-8") as f:
+        regras = json.load(f)["regras"]
+    do_rs = [r["fonte"] for r in regras if r["uf"] == "RS" and r["fonte"]]
+    dos_outros = {r["fonte"] for r in regras if r["uf"] != "RS"}
+    so_rs = [f for f in do_rs if f not in dos_outros]
+    if not so_rs:
+        raise RuntimeError("o catálogo não tem uma fonte só do RS: troque o estado do trecho F")
+    return so_rs[0]
+
+
+FONTE_RS = fonte_so_do_rs()
 
 
 def mostrar_regras_do_rs(r):
@@ -205,7 +221,7 @@ class Rustinho(nav.Rustinho):
 
     def clicar_visivel(self, texto, topo=330, tentativas=40):
         """Rola com a roda do mouse até o texto ficar dentro da área que rola e
-        clica. Na seção Fiscal, "Adicionar regra" fica bem abaixo e "Ir para
+        clica. Na seção Fiscal, a lista "Estado" das regras fica bem abaixo e "Ir para
         Loja" no alto: clicar pela posição sem rolar cairia fora da janela ou
         atrás do cabeçalho fixo das Configurações (título e abas, até uns
         300 px; "topo" com folga: na 0.9.18 a linha da seta ficou 6 px mais
