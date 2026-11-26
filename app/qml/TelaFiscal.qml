@@ -18,10 +18,47 @@ FocusScope {
     // 0.9.15: a conferência fiscal fica dentro de Configurações › Fiscal
     // (sem cabeçalho próprio); a tela sozinha continua existindo.
     property bool embutida: false
+    // FIS-LIGA (decisão do proprietário, 25/11/2026): o seletor do certificado
+    // A3 e da integração fiscal deste computador. Só o gerente vê; ligar pede
+    // a senha de um gerente digitada na hora; qualquer gerente desliga.
+    property var liga: null
 
     ListModel { id: regras }
 
+    function carregarLiga() {
+        const e = Api.chamar("fiscal_liga_estado")
+        liga = e.ok ? e.dados : null
+    }
+
+    function desligarFiscal() {
+        janela.confirmar("Desligar o fiscal neste computador?",
+                         "O Rustinho deixa de usar o certificado A3 e o emissor fiscal deste computador. O resto continua igual: vender, comprar e trazer o XML das notas.",
+                         "Desligar", () => {
+            const r = Api.chamar("fiscal_desligar")
+            if (r.ok) {
+                liga = r.dados
+                janela.avisar("Fiscal desligado neste computador.", "ok")
+            } else {
+                janela.avisar(r.erro, "erro")
+            }
+        })
+    }
+
+    function ligarFiscal() {
+        const r = Api.chamar("fiscal_ligar", { senha: senhaLiga.texto })
+        senhaLiga.texto = ""
+        if (!r.ok) {
+            senhaLiga.erro = r.erro
+            senhaLiga.focar()
+            return
+        }
+        liga = r.dados.estado
+        painelLiga.close()
+        janela.avisar("Fiscal ligado neste computador por " + r.dados.nome + ".", "ok")
+    }
+
     function carregar() {
+        carregarLiga()
         const c = Api.chamar("config_ler")
         if (c.ok)
             ufs = c.dados.ufs
@@ -278,6 +315,48 @@ FocusScope {
                 }
             }
 
+            // FIS-LIGA: o seletor, só para o gerente.
+            Faixa {
+                id: faixaLiga
+                visible: !!tela.liga && tela.liga.podeMudar
+                titulo: "Certificado A3 e integração fiscal"
+                color: tela.liga && tela.liga.ligado ? Tema.verde : Tema.papel
+                corTitulo: tela.liga && tela.liga.ligado ? Tema.verdeEscuro : Tema.apagado
+                Layout.fillWidth: true
+                Text {
+                    text: tela.liga && tela.liga.ligado ? "Ligado neste computador" : "Desligado neste computador"
+                    textFormat: Text.PlainText
+                    color: Tema.tinta
+                    font.family: Tema.titulo
+                    font.weight: Font.Bold
+                    font.pixelSize: 24
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Nota {
+                    text: tela.liga && tela.liga.ligado
+                          ? "O Rustinho pode usar o certificado A3 e o emissor fiscal deste computador. Qualquer gerente desliga."
+                          : "Desligado, o Rustinho não usa o certificado A3 nem fala com o emissor fiscal. Vender, comprar e trazer o XML das notas funcionam igual."
+                    font.pixelSize: 14
+                    Layout.fillWidth: true
+                }
+                Botao {
+                    text: tela.liga && tela.liga.ligado ? "Desligar" : "Ligar"
+                    icone: tela.liga && tela.liga.ligado ? "" : "check"
+                    tipo: tela.liga && tela.liga.ligado ? "secundario" : "principal"
+                    onClicked: {
+                        if (tela.liga && tela.liga.ligado) {
+                            tela.desligarFiscal()
+                        } else {
+                            senhaLiga.texto = ""
+                            senhaLiga.erro = ""
+                            painelLiga.open()
+                            senhaLiga.focar()
+                        }
+                    }
+                }
+            }
+
             // A emissão de notas (0.9.15: o estado real, sem nada inventado).
             EmissaoFiscal { Layout.fillWidth: true }
 
@@ -432,5 +511,35 @@ FocusScope {
     StackView.onActivated: {
         if (!janela || !janela.retornandoDeF11)
             carregar()
+    }
+
+    // FIS-LIGA: ligar pede a senha de um gerente, digitada agora (a senha
+    // digitada antes, no "aperto", não vale), e diz o que muda.
+    Painel {
+        id: painelLiga
+        width: Math.min(480, Tema.largura - 24)
+        onClosed: senhaLiga.texto = ""
+        contentItem: ColumnLayout {
+            spacing: 14
+            Titulo { text: "Ligar o fiscal neste computador"; font.pixelSize: 26; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Nota {
+                text: "Com o fiscal ligado, o Rustinho passa a poder usar o certificado A3 e o emissor fiscal deste computador. Nos outros caixas, nada muda. Para ligar, digite a senha de um gerente."
+                font.pixelSize: 15
+                Layout.fillWidth: true
+            }
+            Campo {
+                id: senhaLiga
+                rotulo: "Senha do gerente"
+                senha: true
+                maximo: 256
+                Layout.fillWidth: true
+                onConfirmado: tela.ligarFiscal()
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 10
+                Botao { text: "Ligar"; icone: "check"; onClicked: tela.ligarFiscal() }
+            }
+        }
     }
 }

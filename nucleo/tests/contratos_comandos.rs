@@ -138,6 +138,10 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("financeiro_resumo", "financeiro", &["leitura"]),
     ("fiscal_automatico", "caixa", &["do_caixa"]),
     ("fiscal_conferir", "leitura", &["leitura"]),
+    // FIS-LIGA (etapa 3, 26/11/2026): a função confere o gerente; ligar pede a senha de um gerente na hora.
+    ("fiscal_desligar", "caixa", &["do_caixa"]),
+    ("fiscal_liga_estado", "leitura", &["leitura"]),
+    ("fiscal_ligar", "caixa", &["do_caixa"]),
     ("fiscal_regras_salvar", "configuracoes", &[]),
     ("fiscal_tributacao", "leitura", &["leitura"]),
     ("fluxo_caixa", "financeiro", &["leitura"]),

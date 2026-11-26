@@ -4,17 +4,20 @@ import QtQuick.Layouts
 import rustinho
 
 // Configurações, uma parte de cada vez nas pílulas: a loja, vendas,
-// crediário, impressão, Simultaneidade, Gerente e "sobre". Simultaneidade
-// (0.9.15) junta o que é dos caixas trabalhando juntos: Duplicatas,
-// Histórico, Caixas, Backup e Fiscal (que saiu da tela inicial); uma senha do
-// gerente ao entrar abre a consulta de todas (gravar pede a senha de novo).
+// crediário, impressão, Simultaneidade, Fiscal, Gerente e "sobre".
+// Simultaneidade (0.9.15) junta o que é dos caixas trabalhando juntos:
+// Duplicatas, Histórico, Caixas e Backup; uma senha do gerente ao entrar abre
+// a consulta de todas (gravar pede a senha de novo). FIS-CAT (0.9.19, etapa
+// 3): o Fiscal é uma categoria própria, com um destino só (saiu da
+// Simultaneidade, sem cópia); a consulta pede a senha do gerente das
+// configurações da loja, como antes.
 FocusScope {
     id: tela
     readonly property var janela: ApplicationWindow.window
     property var config: null
     property bool alterado: false
     property string secao: "loja"
-    readonly property var partesSimultaneidade: ["duplicatas", "historico", "caixas", "backup", "fiscal"]
+    readonly property var partesSimultaneidade: ["duplicatas", "historico", "caixas", "backup"]
     readonly property string grupo: partesSimultaneidade.includes(secao) ? "simultaneidade" : secao
     property string ultimaSimultaneidade: "duplicatas"
     onSecaoChanged: {
@@ -426,6 +429,16 @@ FocusScope {
     function escolherSecao(id, desistiu) {
         if (id === "simultaneidade") {
             entrarSimultaneidade(ultimaSimultaneidade, desistiu)
+            return
+        }
+        // FIS-CAT: o Fiscal é das configurações da loja; quem não é gerente
+        // consulta com a senha do gerente (a mesma consulta de antes).
+        if (id === "fiscal" && !completo) {
+            janela.comGerente("configuracoes", () => {
+                tela.completo = true
+                carregar()
+                tela.secao = id
+            }, desistiu)
             return
         }
         if (id === "backup" && !verBackup) {
@@ -1303,6 +1316,7 @@ FocusScope {
                         { id: "receber", nome: "Crediário" },
                         { id: "impressao", nome: "Impressão" },
                         { id: "simultaneidade", nome: "Simultaneidade" },
+                        { id: "fiscal", nome: "Fiscal" },
                         { id: "gerente", nome: "Gerente" },
                         { id: "aparencia", nome: "Aparência" },
                         { id: "sobre", nome: "Sobre" }
@@ -1310,6 +1324,7 @@ FocusScope {
                         { id: "loja", nome: "Este computador" },
                         { id: "impressao", nome: "Impressão" },
                         { id: "simultaneidade", nome: "Simultaneidade" },
+                        { id: "fiscal", nome: "Fiscal" },
                         { id: "aparencia", nome: "Aparência" },
                         { id: "sobre", nome: "Sobre" }
                     ]
@@ -1335,8 +1350,7 @@ FocusScope {
                             { id: "duplicatas", nome: "Duplicatas" },
                             { id: "historico", nome: "Histórico" },
                             { id: "caixas", nome: "Caixas" },
-                            { id: "backup", nome: "Backup" },
-                            { id: "fiscal", nome: "Fiscal" }
+                            { id: "backup", nome: "Backup" }
                         ]
                         atual: tela.secao
                         onEscolhido: id => {
