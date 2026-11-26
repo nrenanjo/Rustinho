@@ -539,79 +539,142 @@ class CoberturaShardsT112(unittest.TestCase):
         self.assertNotEqual(self.c.portao("nao").returncode, 0)
 
 
-class ArtefatosUnicos(unittest.TestCase):
-    """T031: o artefatos_unicos.py reprova a execução com dois artefatos válidos do mesmo nome."""
+def _baixar():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("baixar_artefatos", os.path.join(AQUI, "baixar_artefatos.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
 
-    def rodar(self, linhas):
-        d = tempfile.mkdtemp(prefix="testar_unicos_")
+
+class BaixarArtefatos(unittest.TestCase):
+    """T031: de cada nome, o artefato mais novo pela data (não pelo maior ID)."""
+
+    def setUp(self):
+        self.b = _baixar()
+
+    def test_manifesto_da_segunda_tentativa_vence_mesmo_com_id_menor(self):
+        # O caso real (45718798615): o Manifesto da 1ª tentativa tem ID MAIOR que o da 2ª.
+        esc, deix = self.b.escolher(["Manifesto\t15073870866\t2026-11-25T23:44:59Z\tfalse",
+                                     "Manifesto\t15073369395\t2026-11-26T00:07:30Z\tfalse"])
+        self.assertEqual(esc, {"Manifesto": 15073369395})
+        self.assertEqual(deix, {"Manifesto": [15073870866]})
+
+    def test_varios_nomes_e_tres_copias(self):
+        esc, deix = self.b.escolher([
+            "Telas-Linux-shard-3\t30\t2026-11-25T23:25:17Z\tfalse",
+            "Telas-Linux-shard-3\t10\t2026-11-26T01:00:00Z\tfalse",
+            "Telas-Linux-shard-3\t20\t2026-11-26T00:07:06Z\tfalse",
+            "Manifesto\t5\t2026-11-26T00:07:30Z\tfalse",
+            "Rustinho-Linux\t7\t2026-11-25T23:10:00Z\tfalse",
+        ])
+        self.assertEqual(esc, {"Telas-Linux-shard-3": 10, "Manifesto": 5, "Rustinho-Linux": 7})
+        self.assertEqual(deix, {"Telas-Linux-shard-3": [30, 20]})
+
+    def test_expirado_nao_conta(self):
+        esc, _ = self.b.escolher(["Manifesto\t1\t2026-11-27T00:00:00Z\ttrue",
+                                  "Manifesto\t2\t2026-11-26T00:07:30Z\tfalse"])
+        self.assertEqual(esc, {"Manifesto": 2})
+
+    def test_mesma_data_vence_o_maior_id(self):
+        esc, _ = self.b.escolher(["A\t3\t2026-11-26T00:00:00Z\tfalse", "A\t9\t2026-11-26T00:00:00Z\tfalse"])
+        self.assertEqual(esc, {"A": 9})
+
+    def test_linha_malformada_para(self):
+        for ruim in ["Manifesto\t5\t2026-11-26T00:07:30Z", "Manifesto\tx\t2026-11-26T00:07:30Z\tfalse",
+                     "\t5\t2026-11-26T00:07:30Z\tfalse"]:
+            with self.assertRaises(ValueError, msg=ruim):
+                self.b.escolher([ruim])
+
+    def test_zip_com_caminho_para_fora_e_recusado(self):
+        import io
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("../fora.txt", "x")
+        d = tempfile.mkdtemp(prefix="testar_zip_")
         try:
-            caminho = os.path.join(d, "lista.tsv")
-            with open(caminho, "w", encoding="utf-8") as f:
-                f.write("".join(l + "\n" for l in linhas))
-            return subprocess.run([sys.executable, "-I", os.path.join(AQUI, "artefatos_unicos.py"), caminho],
-                                  capture_output=True, text=True)
+            with self.assertRaises(ValueError):
+                self.b.extrair(buf.getvalue(), d)
+            self.assertFalse(os.path.exists(os.path.join(os.path.dirname(d), "fora.txt")))
         finally:
             shutil.rmtree(d, ignore_errors=True)
 
-    def test_nomes_unicos_passam(self):
-        r = self.rodar(["Manifesto\t2\t2026-11-26T00:07:30Z\tfalse", "Telas-Linux-shard-3\t1\t2026-11-26T00:07:06Z\tfalse"])
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-
-    def test_manifesto_repetido_reprova(self):
-        # O caso real (45718798615): o Manifesto da 1ª tentativa tem ID MAIOR que o da 2ª.
-        r = self.rodar(["Manifesto\t15073870866\t2026-11-25T23:44:59Z\tfalse",
-                        "Manifesto\t15073369395\t2026-11-26T00:07:30Z\tfalse"])
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("Manifesto: 2 artefatos com o mesmo nome", r.stdout)
-        self.assertIn("Rode a execução INTEIRA de novo", r.stdout)
-
-    def test_repetido_expirado_nao_conta(self):
-        r = self.rodar(["Manifesto\t1\t2026-11-25T23:44:59Z\ttrue", "Manifesto\t2\t2026-11-26T00:07:30Z\tfalse"])
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-
-    def test_lista_vazia_reprova(self):
-        r = self.rodar([])
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("veio vazia", r.stdout)
-
 
 class FormaT031(unittest.TestCase):
-    """A regra 8 do conferir_portao.py (T031): conferir os repetidos antes de baixar, com actions: read."""
+    """A regra 8 do conferir_portao.py (T031), no Portão, no rascunho e no manifesto."""
 
     PASTA = FormaDaChave.PASTA
-    setUp, tearDown, mudar, conferir, reprova_com = (FormaDaChave.setUp, FormaDaChave.tearDown, FormaDaChave.mudar,
-                                                     FormaDaChave.conferir, FormaDaChave.reprova_com)
+    setUp, tearDown, conferir, reprova_com = (FormaDaChave.setUp, FormaDaChave.tearDown, FormaDaChave.conferir,
+                                              FormaDaChave.reprova_com)
+    ONDE = (("ci.yml", "portao"), ("ci.yml", "rascunho"), ("validar.yml", "manifesto"))
+
+    def mexer(self, arq, job, f):
+        import yaml
+        caminho = os.path.join(self.raiz, arq)
+        with open(caminho, encoding="utf-8") as fh:
+            w = yaml.safe_load(fh)
+        f(w, w["jobs"][job])
+        with open(caminho, "w", encoding="utf-8") as fh:
+            yaml.safe_dump(w, fh, allow_unicode=True, sort_keys=False)
+
+    @staticmethod
+    def passo(job):
+        return next(p for p in job["steps"] if "baixar_artefatos.py" in str(p.get("run", "")))
 
     def test_os_workflows_do_projeto_passam(self):
         r = self.conferir()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
-    def test_portao_sem_a_conferencia_reprova(self):
-        with open(os.path.join(self.raiz, "ci.yml"), encoding="utf-8") as f:
-            texto = f.read()
-        i = texto.index("      - name: Conferir que nenhum artefato se repete (T031)")
-        j = texto.index("      - uses: actions/download-artifact", i)
-        with open(os.path.join(self.raiz, "ci.yml"), "w", encoding="utf-8") as f:
-            f.write(texto[:i] + texto[j:])
-        self.reprova_com("ci.yml: o portao não confere os artefatos repetidos")
+    def cada(self, f, trecho):
+        for arq, job in self.ONDE:
+            with self.subTest(job=job):
+                self.tearDown()
+                self.setUp()
+                self.mexer(arq, job, f)
+                self.reprova_com(trecho.format(arq=arq, job=job))
 
-    def test_conferir_depois_de_baixar_reprova(self):
-        with open(os.path.join(self.raiz, "ci.yml"), encoding="utf-8") as f:
-            texto = f.read()
-        i = texto.index("      - name: Conferir que nenhum artefato se repete (T031)")
-        j = texto.index("      - uses: actions/download-artifact", i)
-        k = texto.index("          path: artefatos\n", j) + len("          path: artefatos\n")
-        with open(os.path.join(self.raiz, "ci.yml"), "w", encoding="utf-8") as f:
-            f.write(texto[:i] + texto[j:k] + texto[i:j] + texto[k:])
-        self.reprova_com("ci.yml: o portao confere os artefatos repetidos depois de baixá-los")
+    def test_sem_o_passo_reprova(self):
+        self.cada(lambda w, j: j["steps"].remove(self.passo(j)),
+                  "{arq}: o {job} não baixa os artefatos pelo baixar_artefatos.py")
 
-    def test_rascunho_sem_actions_read_reprova(self):
-        self.mudar("ci.yml", "      contents: write\n      actions: read\n", "      contents: write\n")
-        self.reprova_com("ci.yml: o rascunho não pode ler a lista de artefatos")
+    def test_download_artifact_sem_nome_reprova(self):
+        self.cada(lambda w, j: j["steps"].insert(1, {"uses": "actions/download-artifact@v8", "with": {"path": "x"}}),
+                  "{arq}: o {job} baixa todos os artefatos pelo download-artifact")
 
-    def test_topo_sem_actions_read_reprova_o_portao(self):
-        self.mudar("ci.yml", "permissions:\n  contents: read\n  actions: read\n", "permissions:\n  contents: read\n")
-        self.reprova_com("ci.yml: o portao não pode ler a lista de artefatos")
+    def test_chamada_neutralizada_reprova(self):
+        for troca in ("python3 .github/scripts/baixar_artefatos.py artefatos || true",
+                      "echo baixar_artefatos.py"):
+            self.cada(lambda w, j: self.passo(j).update(run=troca),
+                      "{arq}: o passo do baixar_artefatos.py do {job} não é a chamada exata")
+
+    def test_if_ou_continue_on_error_reprova(self):
+        for chave, valor in (("if", False), ("continue-on-error", True)):
+            self.cada(lambda w, j: self.passo(j).update({chave: valor}),
+                      "{arq}: o passo do baixar_artefatos.py do {job} tem if ou continue-on-error")
+
+    def test_sem_token_reprova(self):
+        self.cada(lambda w, j: self.passo(j).pop("env"),
+                  "{arq}: o passo do baixar_artefatos.py do {job} não tem GH_TOKEN")
+
+    def test_usar_artefatos_antes_de_baixar_reprova(self):
+        def f(w, j):
+            p = self.passo(j)
+            j["steps"].remove(p)
+            j["steps"].append(p)
+        for arq, job in self.ONDE:
+            with self.subTest(job=job):
+                self.tearDown()
+                self.setUp()
+                self.mexer(arq, job, f)
+                self.reprova_com(f"{arq}: o {job} usa os artefatos antes de baixá-los")
+
+    def test_sem_actions_read_reprova(self):
+        def f(w, j):
+            w["permissions"] = {"contents": "read"}
+            if "permissions" in j:
+                j["permissions"] = {"contents": "write"}
+        self.cada(f, "{arq}: o {job} não pode ler a lista de artefatos")
 
 
 if __name__ == "__main__":

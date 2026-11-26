@@ -35,9 +35,9 @@ Regras:
    - O workflow rápido `validar-windows.yml` (se presente) só dispara por
      `workflow_dispatch`, só lê (`contents: read`), não ignora falhas
      (`continue-on-error`) e nunca publica versão.
-8. O Portão e o rascunho rodam o `artefatos_unicos.py` antes de baixar os artefatos e têm `actions: read` (T031):
-   uma execução com dois artefatos do mesmo nome (repetição só dos jobs que falharam) reprova com a orientação de
-   rodar a execução inteira de novo.
+8. O Portão, o rascunho (ci.yml) e o manifesto (validar.yml) baixam os artefatos pelo `baixar_artefatos.py` (o mais
+   novo de cada nome pela data), nunca pelo download-artifact sem nome; o passo é a chamada exata, sem if nem
+   continue-on-error, com GH_TOKEN, antes de qualquer uso dos artefatos, e o job tem `actions: read` (T031).
 
 A pasta dos workflows pode vir como argumento (para os testes).
 """
@@ -196,22 +196,36 @@ def main():
            f"validar.yml: o passo do manifesto tem RUSTINHO_SHARDS_TELAS={env_m.get('RUSTINHO_SHARDS_TELAS')!r}, "
            f"diferente dos {esperado_env} shard(s) esperados de programa-e-telas")
 
-    # 8. T031 (26/11/2026): o Portão e o rascunho conferem, ANTES de baixar os artefatos, que nenhum nome se repete
-    #    na execução (repetir só os jobs que falharam deixa o artefato da tentativa anterior com o mesmo nome, e o
-    #    download-artifact escolhe pelo maior ID). Precisam ler a lista (actions: read).
-    topo_perm = ci.get("permissions") or {}
-    for nome in ("portao", "rascunho"):
-        job = (ci.get("jobs") or {}).get(nome) or {}
+    # 8. T031 (26/11/2026): quem lê os artefatos de toda a execução (Portão e rascunho no ci.yml, manifesto no
+    #    validar.yml) baixa pelo baixar_artefatos.py, que escolhe de cada nome o mais novo pela data; nunca pelo
+    #    download-artifact sem nome (ele escolhe pelo maior ID, e repetir jobs deixa o artefato velho com o mesmo
+    #    nome). O passo é a chamada exata, sem if nem continue-on-error, com o token, antes de qualquer uso dos
+    #    artefatos, e o job pode ler a lista (actions: read).
+    CHAMADA = "python3 .github/scripts/baixar_artefatos.py artefatos"
+    for arq, w, nome in (("ci.yml", ci, "portao"), ("ci.yml", ci, "rascunho"), ("validar.yml", validar, "manifesto")):
+        job = (w.get("jobs") or {}).get(nome) or {}
         passos_job = job.get("steps") or []
-        i_confere = next((i for i, p in enumerate(passos_job) if "artefatos_unicos.py" in str(p.get("run", ""))), None)
-        i_baixa = next((i for i, p in enumerate(passos_job)
-                        if str(p.get("uses", "")).lower().startswith("actions/download-artifact")), None)
-        exigir(i_confere is not None, f"ci.yml: o {nome} não confere os artefatos repetidos (artefatos_unicos.py, T031)")
-        exigir(i_confere is None or i_baixa is None or i_confere < i_baixa,
-               f"ci.yml: o {nome} confere os artefatos repetidos depois de baixá-los (T031)")
-        perm = job["permissions"] if "permissions" in job else topo_perm
+        for p in passos_job:
+            if str(p.get("uses", "")).lower().startswith("actions/download-artifact"):
+                exigir(bool((p.get("with") or {}).get("name")),
+                       f"{arq}: o {nome} baixa todos os artefatos pelo download-artifact (escolhe pelo maior ID, T031)")
+        idx = [i for i, p in enumerate(passos_job) if "baixar_artefatos.py" in str(p.get("run", ""))]
+        exigir(len(idx) == 1, f"{arq}: o {nome} não baixa os artefatos pelo baixar_artefatos.py (T031)")
+        if len(idx) == 1:
+            p = passos_job[idx[0]]
+            exigir(str(p.get("run", "")).strip() == CHAMADA,
+                   f"{arq}: o passo do baixar_artefatos.py do {nome} não é a chamada exata {CHAMADA!r} (T031)")
+            exigir("if" not in p and "continue-on-error" not in p,
+                   f"{arq}: o passo do baixar_artefatos.py do {nome} tem if ou continue-on-error (T031)")
+            exigir((p.get("env") or {}).get("GH_TOKEN") == "${{ github.token }}",
+                   f"{arq}: o passo do baixar_artefatos.py do {nome} não tem GH_TOKEN: ${{{{ github.token }}}} (T031)")
+            antes = [i for i, q in enumerate(passos_job) if i != idx[0] and "artefatos" in str(q.get("run", ""))]
+            exigir(all(i > idx[0] for i in antes),
+                   f"{arq}: o {nome} usa os artefatos antes de baixá-los pelo baixar_artefatos.py (T031)")
+        topo = w.get("permissions") or {}
+        perm = job["permissions"] if "permissions" in job else topo
         exigir(isinstance(perm, dict) and perm.get("actions") in ("read", "write"),
-               f"ci.yml: o {nome} não pode ler a lista de artefatos (falta actions: read, T031)")
+               f"{arq}: o {nome} não pode ler a lista de artefatos (falta actions: read, T031)")
 
     if erros:
         for e in erros:

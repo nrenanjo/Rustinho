@@ -13,6 +13,8 @@
 #   até ele pedir de volta. A chave é uma só: `android` no validar e
 #   RUSTINHO_ANDROID no portão e no rascunho, sempre iguais (conferido).
 #
+# - Artefatos (T031): o Portão e o rascunho baixam pelo baixar_artefatos.py, que escolhe de cada nome o
+#   mais novo pela data (repetir jobs deixa os da tentativa anterior com o mesmo nome).
 # A forma deste arquivo é conferida por .github/scripts/conferir_portao.py.
 name: CI
 
@@ -52,16 +54,10 @@ jobs:
       ANDROID_CHAVE_IMPRESSAO: ${{ vars.ANDROID_CHAVE_IMPRESSAO }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Conferir que nenhum artefato se repete (T031)
+      - name: Baixar os artefatos (o mais novo de cada nome, T031)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api --paginate "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
-            --jq '.artifacts[] | [.name, (.id | tostring), .created_at, (.expired | tostring)] | @tsv' > artefatos.tsv
-          python3 .github/scripts/artefatos_unicos.py artefatos.tsv
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: artefatos
+        run: python3 .github/scripts/baixar_artefatos.py artefatos
       - name: Conferir manifesto, commit, pacotes e versões
         run: python3 .github/scripts/portao.py artefatos
 
@@ -79,16 +75,10 @@ jobs:
       ANDROID_CHAVE_IMPRESSAO: ${{ vars.ANDROID_CHAVE_IMPRESSAO }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Conferir que nenhum artefato se repete (T031)
+      - name: Baixar os artefatos (o mais novo de cada nome, T031)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api --paginate "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
-            --jq '.artifacts[] | [.name, (.id | tostring), .created_at, (.expired | tostring)] | @tsv' > artefatos.tsv
-          python3 .github/scripts/artefatos_unicos.py artefatos.tsv
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: artefatos
+        run: python3 .github/scripts/baixar_artefatos.py artefatos
       - name: Conferir de novo e juntar os arquivos
         shell: bash
         run: |
