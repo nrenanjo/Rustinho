@@ -59,7 +59,7 @@ AUD33-N01; decisões DP-47 revista e DP-50). Atualize este documento a cada migr
 | 0031 | `0031_produto_juncao.sql` | etapa 4 da 0.9.19 Beta (R13): a tabela `produto_juncao` (a peça juntada em outra; viaja) | **não publicada** (linha `0.9.19`). Só aditiva |
 | 0032 | `0032_regras_st_com_fonte.sql` | etapa 3 da 0.9.19 Beta (FIS-P5/P6): colunas `fonte`, `dispositivo`, `consultada_em`, `origem` e `inicio_informado` em `regra_st`; a fonte carimbada só nas 4 regras de SP iguais às da 0002 (fora do log da troca) | **não publicada** (linha `0.9.19`). Só aditiva |
 | 0033 | `0033_nota_fiscal.sql` | etapa 3 da 0.9.19 Beta (FIS-P1/P2): as tabelas `nota_fiscal` e `nota_fiscal_evento` (só deste computador), com o número único por ambiente, modelo e série | **não publicada** (linha `0.9.19`). Só aditiva |
-| 0034 | `0034_raiz_no_circulo.sql` | etapa 4 da 0.9.19 Beta (R8-N8): a visão `produto_raiz` sai e entra a `peca_raiz`, que segue `estoque::raiz` passo a passo (círculo e mais de 64 passos). Nome novo porque uma visão nunca é recriada com o mesmo nome (§4) | **não publicada** (linha `0.9.19`). Só troca uma visão: nenhuma tabela, nenhum registro |
+| 0034 | `0034_raiz_no_circulo.sql` | etapa 4 da 0.9.19 Beta (R8-N8): a visão `produto_raiz` sai e entra a `peca_raiz`, que segue `estoque::raiz` passo a passo (círculo e mais de 64 passos). Nome novo porque uma visão nunca é recriada com o mesmo nome (§6, itens 2 e 3). Um banco de teste na estrutura 34 feito por uma build entre `56f9613` e `7e6bbd0` (com a visão antiga) é recusado como "outra linha": recria-se; não há banco assim publicado | **não publicada** (linha `0.9.19`). Só troca uma visão: nenhuma tabela, nenhum registro |
 
 Um número publicado **nunca muda de conteúdo**.
 
@@ -141,9 +141,10 @@ antes da publicação. A M-C e a M-E foram preparadas, cada uma, como 0025; na o
 
 1. Próximo número, sem buraco nem repetição: arquivo `NNNN_assunto.sql`, no fim de `MIGRACOES`.
 2. **Só aditiva:** colunas, tabelas e índices novos. Recriar tabela só com a primeira linha
-   `-- rustinho: sem_chaves_estrangeiras`.
-3. **Nunca reaproveitar nome de índice.** Não vale apagar e criar de novo com outra definição: dê
-   outro nome. E nunca `CREATE INDEX IF NOT EXISTS` com um nome que já existe: o SQLite não faz
+   `-- rustinho: sem_chaves_estrangeiras`. Exceção: uma **visão** (que não guarda dados) pode sair e dar lugar a
+   outra com nome novo, como na 0034 (item 3).
+3. **Nunca reaproveitar nome de índice nem de visão.** Não vale apagar e criar de novo com outra definição: dê
+   outro nome (o teste `nenhuma_migracao_reaproveita_nome` vale para todo objeto que não é tabela). E nunca `CREATE INDEX IF NOT EXISTS` com um nome que já existe: o SQLite não faz
    nada e não avisa (foi assim que o índice composto do estoque da 0006 nunca existiu, B01/B02).
 4. **Nunca usar nome da linha dev.3:** `produto_fornecedor_alternativo`,
    `produto_fornecedor_alternativo_produto`, `venda_cancelamento` (e qualquer objeto das amostras

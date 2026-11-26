@@ -52,6 +52,7 @@ ColumnLayout {
                   "4": "4 · MEI" })[c] || c
     }
 
+    // C-1 da R4: o CNPJ alfanumérico mantém as letras (a loja guarda o CNPJ só com números e letras maiúsculas).
     function confere(achadoValor, daLoja) {
         if (!daLoja)
             return "a loja ainda não informou (informe em Configurações › Loja)"
@@ -271,7 +272,7 @@ ColumnLayout {
                 }
                 Repeater {
                     model: !painelDescoberta.d ? [] : [
-                        { campo: "", nome: "CNPJ", a: painelDescoberta.d.cnpj, nota: painelDescoberta.d.cnpj ? emissao.confere(painelDescoberta.d.cnpj.valor, painelDescoberta.loja.cnpj.replace(/\D/g, "")) : "" },
+                        { campo: "", nome: "CNPJ", a: painelDescoberta.d.cnpj, nota: painelDescoberta.d.cnpj ? emissao.confere(painelDescoberta.d.cnpj.valor, painelDescoberta.loja.cnpj.replace(/[^0-9A-Za-z]/g, "").toUpperCase()) : "" },
                         { campo: "", nome: "UF", a: painelDescoberta.d.uf, nota: painelDescoberta.d.uf ? emissao.confere(painelDescoberta.d.uf.valor, painelDescoberta.loja.uf) : "" },
                         { campo: "", nome: "Inscrição estadual", a: painelDescoberta.d.ie, nota: "" },
                         { campo: "crt", nome: "Regime (CRT)", a: painelDescoberta.d.crt, nota: "confirme com o contador" },

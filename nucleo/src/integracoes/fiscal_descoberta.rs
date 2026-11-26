@@ -1,7 +1,7 @@
 //! T010 (0.9.19, etapa 3; requisito §6, decisão do proprietário de 25/11/2026): a descoberta dos dados fiscais
 //! nas notas que a própria loja já emitiu.
 //!
-//! Lê só XML **autorizados** (`protNFe` com cStat 100 ou 150) e devolve cada dado com a nota de onde veio. Nada é
+//! Lê só XML **autorizados** (`protNFe` com cStat 100, 120 ou 150) e devolve cada dado com a nota de onde veio. Nada é
 //! gravado aqui: a tela mostra e pede confirmação item por item. Não usa o certificado (só lê arquivos).
 //!
 //! Campos (MOC 7.0, Anexo I): `emit/CNPJ` (C02), `emit/IE` (C17), `emit/enderEmit/UF` (C12), `emit/CRT` (C21),
@@ -121,7 +121,8 @@ fn ler_nota(xml: &str) -> Result<Nota, String> {
     let raiz = doc.root_element();
     let inf = descendente(raiz, "infNFe").ok_or("não é uma NF-e nem NFC-e")?;
     let cstat = descendente(raiz, "protNFe").and_then(|p| descendente(p, "cStat")).and_then(|n| n.text()).unwrap_or("");
-    if !matches!(cstat.trim(), "100" | "150") {
+    // N-1 da R4: 120 é "Autorizado o uso da NF-e, com alerta" (NT 2026.002): a nota vale, e o número dela conta no piso.
+    if !matches!(cstat.trim(), "100" | "120" | "150") {
         return Err("não está autorizada (sem protocolo de autorização)".into());
     }
     let ide = filho(inf, "ide").ok_or("sem o grupo ide")?;
@@ -421,6 +422,15 @@ mod testes {
             .unwrap();
         assert_eq!(registros, 2);
         assert!(!crate::sync::chave_da_loja("fiscal_serie_nfce"), "a série fica só neste computador");
+    }
+
+    /// N-1 da R4: a nota autorizada com alerta (cStat 120, NT 2026.002) conta como autorizada (e o número dela, no piso).
+    #[test]
+    fn r4_n1_nota_120_e_lida() {
+        let com_alerta = nfce(50, 1, "000001", "1").replace("<cStat>100</cStat>", "<cStat>120</cStat>");
+        let d = descobrir_de_xml(&[("a.xml".into(), com_alerta)], "11222333000181");
+        assert_eq!(d.lidas, 1);
+        assert_eq!(d.series[0].ultimo_numero, 50);
     }
 
     #[test]

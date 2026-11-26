@@ -34,6 +34,7 @@ TELA = base.TELA
 TITULO = "Escolha a pasta com os XML das notas que a loja já emitiu"
 LOJA = "11222333000181"
 FORNECEDOR = "99888777000166"
+ALFA = "12ABC34501DE35"
 
 
 def nfce(cnpj, numero, crt):
@@ -65,6 +66,22 @@ def clicar_na_linha(r, texto_da_linha, botao):
         return False
     xdo("mousemove", str(candidatos[0][0]), str(candidatos[0][1]), "click", "1")
     return True
+
+
+def abrir_descoberta(r):
+    """Clica "Trazer os dados…", sobe para Documents na janela de pasta do sistema e abre (lê ela e as subpastas)."""
+    if not clicar_rolando(r, "Trazer os dados das notas que a loja já emitiu"):
+        raise RuntimeError(f"não achei o botão da descoberta (veja {r.saida})")
+    time.sleep(2)
+    janela = nav.janela_de_arquivos(TITULO)
+    if janela is None:
+        raise RuntimeError(f"a janela de pasta não abriu (foto {r.foto('-instr')})")
+    x, y, largura, altura, _ = janela
+    xdo("mousemove", str(x + 41), str(y + 41), "click", "1")
+    time.sleep(1.5)
+    xdo("mousemove", str(x + largura - 180), str(y + altura - 30), "click", "1")
+    time.sleep(3)
+    nav.devolver_teclado()
 
 
 def main():
@@ -100,19 +117,7 @@ def main():
         try:
             r.entrar("Ana")
             time.sleep(3)
-            if not clicar_rolando(r, "Trazer os dados das notas que a loja já emitiu"):
-                raise RuntimeError(f"não achei o botão da descoberta (veja {r.saida})")
-            time.sleep(2)
-            janela = nav.janela_de_arquivos(TITULO)
-            if janela is None:
-                raise RuntimeError(f"a janela de pasta não abriu (foto {r.foto('-instr')})")
-            # A janela abre em Documentos; subir marca a pasta de onde se veio (Documents); Abrir lê ela e as subpastas.
-            x, y, largura, altura, _ = janela
-            xdo("mousemove", str(x + 41), str(y + 41), "click", "1")
-            time.sleep(1.5)
-            xdo("mousemove", str(x + largura - 180), str(y + altura - 30), "click", "1")
-            time.sleep(3)
-            nav.devolver_teclado()
+            abrir_descoberta(r)
             if not r.esperar("Qual destes CNPJ é o da loja?", 20):
                 raise RuntimeError(f"a descoberta não perguntou qual é a loja (foto {r.foto('-instr2')})")
             tudo_certo &= conferir("C-M8: com dois emitentes, pergunta qual é a loja", r.foto("-1"), r.textos(),
@@ -143,6 +148,23 @@ def main():
         certo = valor == {"fiscal_serie_nfce": "1", "fiscal_ultimo_de_antes:1:65:1": "42"} and registros == 1
         print(("✔" if certo else "✘") + f" C-M4: a série e o piso gravados neste computador, com o registro: {valor}, {registros}")
         tudo_certo &= certo
+        # C-1 da R4: a loja com CNPJ alfanumérico. Com uma nota desse CNPJ na pasta, a tela diz "confere com o da
+        # loja" (antes, o replace(/\D/g) apagava as letras do CNPJ da loja e dizia "diferente").
+        with open(os.path.join(notas, "alfa-60.xml"), "w", encoding="utf-8") as f:
+            f.write(nfce(ALFA, 60, 1))
+        imp.por_fora(pasta, f"INSERT OR REPLACE INTO config (chave, valor) VALUES ('loja_cnpj', '{ALFA}');")
+        r = nav.Rustinho(pasta, "TelaConfiguracoes", {"secao": "fiscal"}, fotos, "fis-descoberta-alfa", casa)
+        try:
+            r.entrar("Ana")
+            time.sleep(3)
+            abrir_descoberta(r)
+            if not r.esperar("Séries usadas", 20):
+                raise RuntimeError(f"a descoberta da loja alfanumérica não abriu (foto {r.foto('-instr6')})")
+            tudo_certo &= conferir("C-1 (R4): CNPJ alfanumérico confere com o da loja", r.foto("-4-alfa"), r.textos(),
+                                   tem=[f"CNPJ: {ALFA}", "confere com o da loja", "último número 60"],
+                                   nao_tem=["diferente do informado em Loja", LOJA, FORNECEDOR])
+        finally:
+            r.fechar()
     finally:
         xvfb.terminate()
         shutil.rmtree(raiz, ignore_errors=True)

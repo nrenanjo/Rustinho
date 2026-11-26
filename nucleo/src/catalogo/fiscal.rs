@@ -1381,7 +1381,7 @@ mod testes {
     fn fis_p6_o_catalogo_do_programa_entra_uma_vez_e_respeita_a_loja() {
         let b = Banco::em_memoria().unwrap();
         let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
-        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("4"));
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("5"));
         assert_eq!(carregar_regras_do_programa(&b.conn).unwrap(), 0, "a mesma versão não aplica de novo");
         // A regra que saiu deste banco (por exemplo, a exclusão que veio de outro caixa) não volta na mesma versão.
         b.conn.execute("DELETE FROM regra_st WHERE id = 'ba-pneus-com-st'", []).unwrap();
@@ -1455,9 +1455,21 @@ mod testes {
         assert_eq!(st("ES", "16.001.00"), Some(true));
         let lista = regras(&b.conn).unwrap();
         for id in ["es-pneus-com-st", "pe-pneus-com-st", "ms-pneus-com-st"] {
-            assert!(achar(&lista, id).descricao.contains("lista por item não foi conferida"), "{id}");
+            assert!(achar(&lista, id).descricao.contains("não conferimos peça por peça"), "{id}");
         }
         assert!(achar(&lista, "rn-pneus-16005-sem-st").dispositivo.contains("art. 14, § 7º"));
+        // N-2 da R4: o PR lista só parte das autopeças (art. 28, 69 posições: 01.001.00 a 01.070.00, menos o 01.019.00
+        // e o 01.062.01). Fora da lista, sem ST.
+        let pr = |cest: &str| st("PR", cest);
+        for cest in ["01.001.00", "01.062.00", "01.070.00"] {
+            assert_eq!(pr(cest), Some(true), "PR {cest}");
+        }
+        for cest in ["01.019.00", "01.062.01", "01.071.00", "01.099.00", "01.108.00", "01.999.00"] {
+            assert_eq!(pr(cest), Some(false), "PR {cest}");
+        }
+        for id in ["ba-autopecas-com-st", "pe-autopecas-com-st", "ms-autopecas-com-st", "mt-autopecas-com-st"] {
+            assert!(achar(&lista, id).descricao.contains("não conferimos peça por peça"), "{id}");
+        }
         assert_eq!(st("RR", "16.007.01"), Some(true), "RR: protetor de bicicleta continua");
         assert_eq!(st("RR", "16.008.00"), Some(true));
         assert_eq!(st("PR", "16.005.00"), Some(true), "PR traz o de bicicleta");
@@ -1597,7 +1609,7 @@ mod testes {
         b.conn.execute_batch("DROP TRIGGER t_b6;").unwrap();
         drop(b);
         let b = Banco::abrir(&caminho).unwrap();
-        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("4"), "a próxima abertura aplica");
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("5"), "a próxima abertura aplica");
         assert!(regras(&b.conn).unwrap().iter().any(|r| r.id == "go-pneus-com-st"));
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
@@ -1669,7 +1681,7 @@ mod testes {
     fn fis_p6_as_regras_do_programa_tem_fonte() {
         let b = Banco::em_memoria().unwrap();
         let lista = regras(&b.conn).unwrap();
-        assert_eq!(lista.len(), 60, "4 de SP (0002/0032) e 56 do catálogo, versão 4");
+        assert_eq!(lista.len(), 76, "4 de SP (0002/0032) e 72 do catálogo, versão 5");
         for r in &lista {
             assert_eq!(r.origem, "rustinho", "{}", r.id);
             assert!(!r.fonte.is_empty() && !r.dispositivo.is_empty() && !r.consultada_em.is_empty(), "{}", r.id);
@@ -1711,7 +1723,7 @@ mod testes {
         let lista = regras(&b.conn).unwrap();
         assert_eq!(achar(&lista, &id).origem, "loja");
         assert!(achar(&lista, &id).inicio_informado, "a regra da loja tem o início que o gerente digitou");
-        assert_eq!(lista.len(), 61);
+        assert_eq!(lista.len(), 77);
 
         assert_eq!(ler_data("1/10/26").unwrap().unwrap(), "2026-10-01");
         assert!(ler_data("31/02/2026").is_err());
