@@ -1255,7 +1255,10 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         None => String::new(),
     };
     let ids_juntadas: Vec<String> = conn
-        .prepare("SELECT produto_id FROM produto_juncao WHERE para_id = ?1 ORDER BY produto_id")?
+        // T029 (R12-B2 da 007): a linha sem `produto_id` (só por fora da troca) não quebra a ficha.
+        .prepare(
+            "SELECT produto_id FROM produto_juncao WHERE para_id = ?1 AND produto_id IS NOT NULL ORDER BY produto_id",
+        )?
         .query_map([id], |l| l.get(0))?
         .collect::<Result<_, _>>()?;
     let mut historico = auditoria::historico(conn, "produto", id, 30)?;

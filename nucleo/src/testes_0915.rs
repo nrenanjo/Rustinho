@@ -1269,3 +1269,23 @@ fn t030_chave_diferente_dos_dados_vira_pendencia_e_nao_entra() {
     assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM produto_juncao"), 0);
     assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM produto_preco WHERE tabela = 'atacado'"), 0);
 }
+
+/// T029 (R12-B2 da 007): uma linha de junção sem `produto_id` (o SQLite aceita NULL numa chave de texto) que chegue por
+/// fora da troca (um backup restaurado, por exemplo) não quebra as Duplicatas nem a ficha da peça que ficou.
+#[test]
+fn t029_juncao_sem_produto_nao_quebra_as_leituras() {
+    let b = Banco::em_memoria().unwrap();
+    let u = crate::faixas::para_testes::configurar(&b, "Caixa 1", 0);
+    let k = crate::faixas::para_testes::peca(&b, &u, "Filtro K");
+    b.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+    b.conn
+        .execute(
+            "INSERT INTO produto_juncao (produto_id, para_id, em, por, motivo) VALUES (NULL, ?1, '2026-11-26', NULL, 'x')",
+            [&k],
+        )
+        .unwrap();
+    b.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+    crate::faixas::repetidos(&b.conn).expect("as Duplicatas abrem");
+    let f = crate::produtos::ficha(&b.conn, &k).expect("a ficha da peça que ficou abre");
+    assert_eq!(f.id, k);
+}

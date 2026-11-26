@@ -1378,7 +1378,8 @@ pub struct Repetido {
 /// (compactados, sem vazios); a peça juntada com outra sai dos grupos (ela já é a outra).
 pub fn repetidos(conn: &Connection) -> Resultado<Vec<Repetido>> {
     let juntadas: std::collections::BTreeSet<String> = conn
-        .prepare("SELECT produto_id FROM produto_juncao")?
+        // T029 (R12-B2 da 007): a linha sem `produto_id` (só por fora da troca, como um backup) não quebra a leitura.
+        .prepare("SELECT produto_id FROM produto_juncao WHERE produto_id IS NOT NULL")?
         .query_map([], |l| l.get(0))?
         .collect::<Result<_, _>>()?;
     let mut grupos: BTreeMap<(String, String), Vec<PecaRepetida>> = BTreeMap::new();
