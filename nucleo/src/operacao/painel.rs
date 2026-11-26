@@ -414,7 +414,7 @@ fn pecas_periodo(conn: &Connection, de: &str, ate: &str, limite: i64) -> Resulta
         "SELECT COALESCE(p.nome, vi.descricao), COALESCE(p.marca, ''), COALESCE(p.unidade, vi.unidade),
                 SUM(vi.quantidade - COALESCE(dv.q, 0)), SUM(vi.total - COALESCE(dv.v, 0))
            FROM venda_item vi JOIN venda v ON v.id = vi.venda_id
-           LEFT JOIN produto p ON p.id = COALESCE((SELECT r.raiz FROM produto_raiz r WHERE r.produto_id = vi.produto_id), vi.produto_id)
+           LEFT JOIN produto p ON p.id = COALESCE((SELECT r.raiz FROM peca_raiz r WHERE r.produto_id = vi.produto_id), vi.produto_id)
            LEFT JOIN (SELECT di.venda_item_id, SUM(di.quantidade) AS q, SUM(di.valor_item) AS v
                         FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
                        WHERE d.cancelado_em IS NULL GROUP BY di.venda_item_id) dv ON dv.venda_item_id = vi.id

@@ -170,11 +170,12 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
         }
     }
     let loja = if !cnpj_da_loja.trim().is_empty() {
-        crate::documento::digitos(cnpj_da_loja)
+        // F3-3 da R3: `limpar` (o CNPJ alfanumérico tem letras).
+        crate::documento::limpar(cnpj_da_loja)
     } else {
         let mut conta: BTreeMap<String, i64> = BTreeMap::new();
         for n in &notas {
-            *conta.entry(crate::documento::digitos(&n.cnpj)).or_default() += 1;
+            *conta.entry(crate::documento::limpar(&n.cnpj)).or_default() += 1;
         }
         if conta.len() > 1 {
             let mut c: Vec<Candidato> = conta.into_iter().map(|(cnpj, notas)| Candidato { cnpj, notas }).collect();
@@ -185,7 +186,7 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
         conta.into_keys().next().unwrap_or_default()
     };
     let (da_loja, outras): (Vec<&Nota>, Vec<&Nota>) =
-        notas.iter().partition(|n| crate::documento::digitos(&n.cnpj) == loja);
+        notas.iter().partition(|n| crate::documento::limpar(&n.cnpj) == loja);
     for n in outras {
         d.ignorados.push(format!("{}: é de outro emitente ({})", n.chave, n.cnpj));
     }

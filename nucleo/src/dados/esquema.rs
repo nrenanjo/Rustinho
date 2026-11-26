@@ -147,8 +147,8 @@ pub const TABELAS: &[Tabela] = &[
     t("conta_pagar_saldo", Derivada, &[]),
     t("conta_receber_saldo", Derivada, &[]),
     t("vale_saldo", Derivada, &[]),
-    // R13 (DP-42): a peça onde cada uma foi parar (raiz da junção).
-    t("produto_raiz", Derivada, &[]),
+    // R13 (DP-42): a peça onde cada uma foi parar (raiz da junção). Desde a 0034 (R8-N8), `peca_raiz`.
+    t("peca_raiz", Derivada, &[]),
 ];
 
 // ---------------------------------------------------------------------------

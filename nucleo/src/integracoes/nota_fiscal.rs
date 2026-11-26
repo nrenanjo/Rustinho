@@ -38,34 +38,49 @@ pub enum Origem {
     Consulta,
 }
 
-/// Os códigos de rejeição que **não** dizem que a nota ficou fora da SEFAZ (MOC 7.0, Anexo I): a duplicidade (204 e
-/// 539: a nota pode já estar autorizada), a nota já denegada (205), já inutilizada (206), já cancelada (218) ou com o
-/// mesmo número já transmitida e aguardando (635) na base (K2 da R2: o número já existe lá e não pode voltar), o "NF-e
-/// não consta na base" (217, que só tem sentido na consulta), a chave diferente da existente (613), o consumo indevido
-/// (656: a SEFAZ nem olhou) e o erro não catalogado (999).
-const REJEICAO_NAO_CONCLUSIVA: &[&str] = &["204", "205", "206", "217", "218", "539", "613", "635", "656", "999"];
+/// Os códigos de rejeição que **não** dizem que a nota ficou fora da SEFAZ (MOC 7.0, Anexo I, 4.4.2): a duplicidade (204
+/// e 539: a nota pode já estar autorizada), a nota já denegada (205), já inutilizada (206), já cancelada (218) ou com o
+/// mesmo número já transmitida e aguardando (635) na base (K2 da R2: o número já existe lá e não pode voltar), o EPEC
+/// registrado para a série e o número (692, F3-4 da R3), o "NF-e não consta na base" (217, que só tem sentido na
+/// consulta), a chave diferente da existente (613), o consumo indevido (656: a SEFAZ nem olhou) e o erro não
+/// catalogado (999). Comparados como número (Cód-2 da R3: "0206" é o 206).
+const REJEICAO_NAO_CONCLUSIVA: &[u32] = &[204, 205, 206, 217, 218, 539, 613, 635, 656, 692, 999];
+
+/// Os códigos de resultado do processamento (MOC 7.0, Anexo I, tabela 4.4.1), fora o 142, que também é rejeição
+/// (4.4.2): não são rejeição da nota.
+const RESULTADOS_DO_PROCESSAMENTO: &[u32] = &[
+    100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 124, 128, 135, 136, 137, 138, 139, 140, 150, 151,
+    155,
+];
 
 /// O que uma resposta da SEFAZ quer dizer para a nota:
 /// - 100 e 150 (MOC 7.0, Anexo I, 4.4.1): autorizada; 110 (4.4.1) e 301, 302 e 303 (4.4.3): denegada;
 /// - na consulta: 101 e 151 (4.4.1) e 155 (Visão Geral, 5.9.4), cancelada; 217 ("NF-e não consta na base de dados da
 ///   SEFAZ"), não recebida;
-/// - no envio, rejeitada: um código de rejeição (142, de 201 a 999, os de 4 dígitos das NT em vigor, como 1153 da NT
-///   2025.002 e 1275 a 1277 da NT 2026.005, e o 129 da NT 2023.002; K1 da R2), fora os de [`REJEICAO_NAO_CONCLUSIVA`];
-/// - todo o resto (103, 104, 105 e 106 do lote, 108 e 109 do serviço parado, texto que não é código) não é conclusivo:
-///   desconhecida.
+/// - no envio, rejeitada: **todo código de 100 a 9999 que não é resultado do processamento (4.4.1) nem está em
+///   [`REJEICAO_NAO_CONCLUSIVA`]** (F3-1 da R3). Assim entram as rejeições das NT em vigor sem precisar de lista: 126
+///   (NT 2023.002), 129 (NT 2023.002), 156 a 188 (NT 2026.007, validação cadastral), os de 4 dígitos (NT 2025.002,
+///   2026.005, 2026.007);
+/// - todo o resto (os resultados 103 a 109 do lote e do serviço, código fora de 100 a 9999, texto que não é código)
+///   não é conclusivo: desconhecida.
 pub fn estado_da_resposta(origem: Origem, cstat: &str) -> &'static str {
     let c = cstat.trim();
-    match c {
-        "100" | "150" => return "autorizada",
-        "110" | "301" | "302" | "303" => return "denegada",
-        "101" | "151" | "155" if origem == Origem::Consulta => return "cancelada",
-        "217" if origem == Origem::Consulta => return "nao_recebida",
+    let Some(n) = (if (1..=4).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_digit()) {
+        c.parse::<u32>().ok()
+    } else {
+        None
+    }) else {
+        return "desconhecida";
+    };
+    match n {
+        100 | 150 => return "autorizada",
+        110 | 301 | 302 | 303 => return "denegada",
+        101 | 151 | 155 if origem == Origem::Consulta => return "cancelada",
+        217 if origem == Origem::Consulta => return "nao_recebida",
         _ => {}
     }
-    let numero: Option<u32> =
-        if matches!(c.len(), 3 | 4) && c.bytes().all(|b| b.is_ascii_digit()) { c.parse().ok() } else { None };
-    let rejeicao = numero.is_some_and(|n| n == 129 || n == 142 || (201..=9999).contains(&n))
-        && !REJEICAO_NAO_CONCLUSIVA.contains(&c);
+    let rejeicao =
+        (100..=9999).contains(&n) && !RESULTADOS_DO_PROCESSAMENTO.contains(&n) && !REJEICAO_NAO_CONCLUSIVA.contains(&n);
     if origem == Origem::Envio && rejeicao {
         "rejeitada"
     } else {
@@ -110,7 +125,8 @@ pub fn codigo_da_uf(uf: &str) -> Option<&'static str> {
 /// K3 da R2: a chave é da loja? A UF (posições 1–2) e o CNPJ do emitente (7–20) têm de ser os da loja. `Err`: a loja
 /// ainda não informou o CNPJ ou a UF (sem eles, não há como saber de quem é a chave).
 fn chave_e_da_loja(conn: &Connection, chave: &str) -> Result<bool, &'static str> {
-    let cnpj = crate::documento::digitos(&crate::config::ler(conn, "loja_cnpj").ok().flatten().unwrap_or_default());
+    // F3-3 da R3: `limpar` (números e letras), como o CNPJ é guardado: o alfanumérico também confere.
+    let cnpj = crate::documento::limpar(&crate::config::ler(conn, "loja_cnpj").ok().flatten().unwrap_or_default());
     let uf = crate::config::ler(conn, "loja_uf").ok().flatten().unwrap_or_default();
     let (Some(cuf), 14) = (codigo_da_uf(&uf), cnpj.len()) else {
         return Err("sem o CNPJ e a UF da loja, o Rustinho não confere de quem é a chave");
@@ -135,9 +151,20 @@ fn digito_da_chave(corpo: &[u8]) -> u8 {
 
 /// A chave de acesso confere com esta nota? 44 dígitos, o dígito verificador, e o modelo (posições 21–22), a série
 /// (23–25) e o número (26–34) da nota (MOC 7.0, Anexo I, campo B03 e item 5.4).
+///
+/// F3-3 da R3: o CNPJ alfanumérico (gerado pela Receita desde 31/07/2026; NT Conjunta 2025.001 e NT 2026.004): as 12
+/// primeiras posições do CNPJ na chave (7 a 18) podem ter letras maiúsculas; o resto é número, e o dígito verificador
+/// usa o código ASCII menos 48 (o mesmo de `digito_da_chave`).
 pub fn chave_e_desta_nota(chave: &str, modelo: i64, serie: i64, numero: i64) -> bool {
     let b = chave.trim().as_bytes();
-    if b.len() != 44 || !b.iter().all(u8::is_ascii_digit) {
+    let posicao_certa = |(i, c): (usize, &u8)| {
+        if (6..18).contains(&i) {
+            c.is_ascii_digit() || c.is_ascii_uppercase()
+        } else {
+            c.is_ascii_digit()
+        }
+    };
+    if b.len() != 44 || !b.iter().enumerate().all(posicao_certa) {
         return false;
     }
     let campo = |de: usize, ate: usize| std::str::from_utf8(&b[de..ate]).ok().and_then(|t| t.parse::<i64>().ok());
@@ -597,7 +624,7 @@ pub fn painel(conn: &Connection, f: &Filtros) -> Resultado<Painel> {
     ))?;
     let notas: Vec<NotaResumo> = c
         // K8 da R2: a chave (44 dígitos) só entra na pesquisa com 10 dígitos ou mais; pesquisar "3" achava quase todas.
-        .query_map(params![amb, f.modelo, de, ate, texto, crate::documento::digitos(&f.texto).len() >= 10], |l| {
+        .query_map(params![amb, f.modelo, de, ate, texto, crate::documento::limpar(&f.texto).len() >= 10], |l| {
             Ok(NotaResumo {
                 id: l.get(0)?,
                 modelo: l.get(1)?,
@@ -660,7 +687,7 @@ pub fn explicacao(estado: &str) -> &'static str {
         "rascunho" => "Esta nota ainda não foi transmitida. O número sai na hora de transmitir.",
         "enviada" => "A transmissão começou e a resposta ainda não chegou. Não transmita de novo: consulte na SEFAZ.",
         "autorizada" => "A SEFAZ autorizou esta nota.",
-        "rejeitada" => "A SEFAZ recusou esta nota. Veja o motivo abaixo e corrija. Depois ela pode ser transmitida de novo, com o mesmo número (quando o emissor estiver ligado), ou descartada.",
+        "rejeitada" => "A SEFAZ recusou esta nota. Veja o motivo abaixo: o que ele aponta se acerta no cadastro (da peça, do cliente ou da loja). Quando o emissor estiver ligado, ela pode ser transmitida de novo, com o mesmo número; ou pode ser descartada.",
         "denegada" => "A SEFAZ denegou esta nota (problema no cadastro do emitente ou do destinatário). O número não pode ser usado de novo.",
         "desconhecida" => "O Rustinho não sabe se a SEFAZ recebeu esta nota: a resposta não veio ou não foi conclusiva. Não transmita de novo: consulte na SEFAZ primeiro.",
         "nao_recebida" => "A SEFAZ informou que esta nota não chegou lá. Ela pode ser transmitida de novo (quando o emissor estiver ligado) ou descartada.",
@@ -847,6 +874,14 @@ pub fn pode_falar_com_a_sefaz(conn: &Connection, id: &str) -> Resultado<()> {
     if !crate::fiscal_porta::ligado(conn)? {
         return Err(Erro::validacao(
             "O fiscal está desligado neste computador: nada foi enviado à SEFAZ. Um gerente liga em Configurações › Fiscal.",
+        ));
+    }
+    // Cód-4 da R3: sem o CNPJ e a UF da loja, a resposta da SEFAZ não teria como ser conferida (K3): não sai.
+    let cnpj = crate::documento::limpar(&crate::config::ler(conn, "loja_cnpj")?.unwrap_or_default());
+    let uf = crate::config::ler(conn, "loja_uf")?.unwrap_or_default();
+    if cnpj.len() != 14 || codigo_da_uf(&uf).is_none() {
+        return Err(Erro::validacao(
+            "Falta informar o CNPJ e o estado (UF) da loja em Configurações › Loja: nada foi enviado à SEFAZ.",
         ));
     }
     let da_nota: i64 = tx_ambiente(conn, id)?;
@@ -1141,6 +1176,11 @@ mod testes {
             (Envio, "1275", "rejeitada"),
             (Envio, "1002", "rejeitada"),
             (Envio, "129", "rejeitada"),
+            // F3-1 da R3: 126 (NT 2023.002) e 156 a 188 (NT 2026.007, validação cadastral).
+            (Envio, "126", "rejeitada"),
+            (Envio, "156", "rejeitada"),
+            (Envio, "164", "rejeitada"),
+            (Envio, "188", "rejeitada"),
             (Consulta, "100", "autorizada"),
             (Consulta, "110", "denegada"),
             (Consulta, "101", "cancelada"),
@@ -1152,7 +1192,7 @@ mod testes {
         }
         for c in [
             "103", "104", "105", "106", "107", "108", "109", "124", "135", "204", "205", "206", "218", "539", "613",
-            "635", "656", "999", "000", "099", "10000", "12a", "abc", "", " ",
+            "635", "656", "692", "999", "0206", "0635", "000", "099", "10000", "12a", "abc", "", " ",
         ] {
             assert_eq!(estado_da_resposta(Envio, c), "desconhecida", "envio {c:?}");
         }
@@ -1264,11 +1304,66 @@ mod testes {
             assert_eq!(consultar(&mut b.conn, &u, &mut falso, &id).unwrap(), "desconhecida", "{o_que}");
             assert_eq!(detalhe(&b.conn, &id).unwrap().chave, "", "{o_que}");
         }
+        // Cód-4 da R3: sem o CNPJ (ou a UF) da loja, a nota nem sai, e a mensagem diz onde informar.
+        for (chave, o_que) in [("loja_cnpj", "sem CNPJ"), ("loja_uf", "sem UF")] {
+            let (mut b, u) = banco();
+            crate::config::gravar(&b.conn, chave, "").unwrap();
+            let id = nova(&b, &u);
+            let mut falso = Falso::com(vec![ok("100")]);
+            let e = transmitir(&mut b.conn, &u, &mut falso, &id).unwrap_err().to_string();
+            assert!(e.contains("Configurações › Loja") && e.contains("nada foi enviado"), "{o_que}: {e}");
+            assert_eq!((situacao(&b, &id), falso.enviadas.len()), ("rascunho".to_string(), 0), "{o_que}");
+        }
+        // Se o CNPJ some depois do envio, a resposta ainda não é aceita sem conferir (K3).
         let (mut b, u) = banco();
-        crate::config::gravar(&b.conn, "loja_cnpj", "").unwrap();
         let id = nova(&b, &u);
-        assert_eq!(transmitir(&mut b.conn, &u, &mut Falso::com(vec![ok("100")]), &id).unwrap(), "desconhecida");
-        assert!(detalhe(&b.conn, &id).unwrap().eventos.iter().any(|e| e.detalhe.contains("sem o CNPJ e a UF da loja")));
+        transmitir(&mut b.conn, &u, &mut Falso::com(vec![None]), &id).unwrap();
+        crate::config::gravar(&b.conn, "loja_cnpj", "").unwrap();
+        let r = RespostaSefaz {
+            cstat: "100".into(),
+            chave: chave(65, 1, 1, 1),
+            protocolo: "1".into(),
+            ..Default::default()
+        };
+        assert_eq!(registrar_resposta(&b.conn, &u, &id, Origem::Consulta, Ok(&r)).unwrap(), "desconhecida");
+    }
+
+    /// F3-3 da R3: a loja com CNPJ alfanumérico. A chave com letras nas posições do CNPJ confere (o dígito verificador
+    /// pelo código ASCII menos 48), e a autorização vale; letra fora das posições do CNPJ não.
+    #[test]
+    fn r3_f33_cnpj_alfanumerico() {
+        let (mut b, u) = banco();
+        crate::config::gravar(&b.conn, "loja_cnpj", "12.ABC.345/01DE-35").unwrap();
+        let id = nova(&b, &u);
+        struct Alfa;
+        impl Adaptador for Alfa {
+            fn status(&mut self, _l: &Licenca) -> Resultado<String> {
+                Ok("OK".into())
+            }
+            fn enviar(&mut self, _l: &Licenca, nota: &NotaParaEnviar) -> Resultado<RespostaSefaz> {
+                let mut corpo =
+                    format!("352611{}{:02}{:03}{:09}100000001", "12ABC34501DE35", nota.modelo, nota.serie, nota.numero);
+                corpo.push((b'0' + digito_da_chave(corpo.as_bytes())) as char);
+                Ok(RespostaSefaz {
+                    chave: corpo,
+                    cstat: "100".into(),
+                    motivo: "Autorizado".into(),
+                    protocolo: "135260000000009".into(),
+                    xml_nome: String::new(),
+                })
+            }
+            fn consultar(&mut self, _l: &Licenca, _nota: &NotaParaEnviar) -> Resultado<RespostaSefaz> {
+                unreachable!()
+            }
+        }
+        assert_eq!(transmitir(&mut b.conn, &u, &mut Alfa, &id).unwrap(), "autorizada");
+        let c = detalhe(&b.conn, &id).unwrap().chave;
+        assert!(chave_e_desta_nota(&c, 65, 1, 1));
+        let mut errada = c.clone();
+        errada.replace_range(21..22, "A");
+        assert!(!chave_e_desta_nota(&errada, 65, 1, 1), "letra fora do CNPJ");
+        // A pesquisa pela chave alfanumérica acha a nota.
+        assert_eq!(painel(&b.conn, &Filtros { texto: c.clone(), ..Default::default() }).unwrap().notas.len(), 1);
     }
 
     /// FIS-P2: sem resposta não é rejeição, e não se reenvia; só a consulta resolve. A consulta que diz "não consta"
@@ -1597,6 +1692,33 @@ mod testes {
         assert!(!hoje.notas.is_empty() && hoje.notas.iter().all(|n| n.id != velha));
         let sete = painel(&b.conn, &Filtros { dias: 7, ..Default::default() }).unwrap();
         assert!(sete.notas.iter().any(|n| n.id == velha));
+    }
+
+    /// Cód-5 da R3 (B2 da R1): a borda do dia local. A nota criada na meia-noite local de hoje (gravada em UTC) é de
+    /// "hoje"; a criada um segundo antes, não. Sem mexer no fuso: o SQLite dá a meia-noite local em UTC.
+    #[test]
+    fn r3_cod5_hoje_comeca_na_meia_noite_local() {
+        let (b, u) = banco();
+        let meia_noite = nova(&b, &u);
+        let antes = nova(&b, &u);
+        b.conn
+            .execute(
+                "UPDATE nota_fiscal SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', date('now', 'localtime'), 'utc') WHERE id = ?1",
+                [&meia_noite],
+            )
+            .unwrap();
+        b.conn
+            .execute(
+                "UPDATE nota_fiscal SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', date('now', 'localtime'), 'utc', '-1 second')
+                  WHERE id = ?1",
+                [&antes],
+            )
+            .unwrap();
+        let hoje = painel(&b.conn, &Filtros { dias: 1, ..Default::default() }).unwrap();
+        assert!(hoje.notas.iter().any(|n| n.id == meia_noite), "a da meia-noite local é de hoje");
+        assert!(!hoje.notas.iter().any(|n| n.id == antes), "a de um segundo antes é de ontem");
+        let dois = painel(&b.conn, &Filtros { dias: 2, ..Default::default() }).unwrap();
+        assert!(dois.notas.iter().any(|n| n.id == antes));
     }
 
     #[test]

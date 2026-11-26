@@ -119,9 +119,9 @@ pub fn tributacao(conn: &Connection, uf: &str, cest: &str, csosn_peca: &str, dat
     .to_string();
     let alerta = match (csosn.as_str(), com_st) {
         // F2-4 da R1 (MOC 7.0, Anexo I: N12a-20, rejeição 383; N12a-40 e N12a-44; N12a-70): o substituto só existe na
-        // NF-e para contribuinte; na NFC-e e na NF-e para consumidor a SEFAZ recusa.
+        // NF-e para contribuinte; na NFC-e e na NF-e para não contribuinte (indIEDest = 9) a SEFAZ recusa.
         ("201" | "202" | "203", _) => format!(
-            "CSOSN {csosn} (a loja cobra a ST) só vale na NF-e para empresa contribuinte. Na NFC-e do balcão a SEFAZ recusa (rejeição 383) e na NF-e para consumidor também (rejeição 600). Confirme com o contador."
+            "CSOSN {csosn} (a loja cobra a ST) só vale na NF-e para empresa contribuinte. Na NFC-e do balcão a SEFAZ recusa (rejeição 383) e na NF-e para não contribuinte do ICMS também (rejeição 600). Confirme com o contador."
         ),
         ("500", Some(false)) => format!(
             "Esta peça está com CSOSN 500, mas pela regra de {uf} ela não tem mais ST nesta data. O certo deve ser 102 (CFOP 5102). Confirme com o contador."
@@ -1381,7 +1381,7 @@ mod testes {
     fn fis_p6_o_catalogo_do_programa_entra_uma_vez_e_respeita_a_loja() {
         let b = Banco::em_memoria().unwrap();
         let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
-        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("3"));
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("4"));
         assert_eq!(carregar_regras_do_programa(&b.conn).unwrap(), 0, "a mesma versão não aplica de novo");
         // A regra que saiu deste banco (por exemplo, a exclusão que veio de outro caixa) não volta na mesma versão.
         b.conn.execute("DELETE FROM regra_st WHERE id = 'ba-pneus-com-st'", []).unwrap();
@@ -1441,6 +1441,23 @@ mod testes {
             assert_eq!(st(uf, "16.007.00"), Some(true), "{uf}: protetor comum continua");
         }
         assert_eq!(st("BA", "16.005.00"), Some(true), "BA traz o de bicicleta (item 10.5)");
+        // F3-2 da R3: RS (Item V, até 31/12/2026: só os itens 1 a 6) e ES (art. 265, § 6º, III: pneus e câmaras de
+        // bicicleta).
+        let rs = |cest: &str| tributacao(&b.conn, "RS", cest, "", "2026-12-15").unwrap().com_st;
+        for cest in ["16.005.00", "16.006.00", "16.007.01", "16.009.00"] {
+            assert_eq!(rs(cest), Some(false), "RS {cest}");
+        }
+        assert_eq!(rs("16.001.00"), Some(true));
+        assert_eq!(rs("16.007.00"), Some(true));
+        for cest in ["16.005.00", "16.009.00"] {
+            assert_eq!(st("ES", cest), Some(false), "ES {cest}");
+        }
+        assert_eq!(st("ES", "16.001.00"), Some(true));
+        let lista = regras(&b.conn).unwrap();
+        for id in ["es-pneus-com-st", "pe-pneus-com-st", "ms-pneus-com-st"] {
+            assert!(achar(&lista, id).descricao.contains("lista por item não foi conferida"), "{id}");
+        }
+        assert!(achar(&lista, "rn-pneus-16005-sem-st").dispositivo.contains("art. 14, § 7º"));
         assert_eq!(st("RR", "16.007.01"), Some(true), "RR: protetor de bicicleta continua");
         assert_eq!(st("RR", "16.008.00"), Some(true));
         assert_eq!(st("PR", "16.005.00"), Some(true), "PR traz o de bicicleta");
@@ -1580,7 +1597,7 @@ mod testes {
         b.conn.execute_batch("DROP TRIGGER t_b6;").unwrap();
         drop(b);
         let b = Banco::abrir(&caminho).unwrap();
-        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("3"), "a próxima abertura aplica");
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("4"), "a próxima abertura aplica");
         assert!(regras(&b.conn).unwrap().iter().any(|r| r.id == "go-pneus-com-st"));
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
@@ -1652,7 +1669,7 @@ mod testes {
     fn fis_p6_as_regras_do_programa_tem_fonte() {
         let b = Banco::em_memoria().unwrap();
         let lista = regras(&b.conn).unwrap();
-        assert_eq!(lista.len(), 54, "4 de SP (0002/0032) e 50 do catálogo, versão 3");
+        assert_eq!(lista.len(), 60, "4 de SP (0002/0032) e 56 do catálogo, versão 4");
         for r in &lista {
             assert_eq!(r.origem, "rustinho", "{}", r.id);
             assert!(!r.fonte.is_empty() && !r.dispositivo.is_empty() && !r.consultada_em.is_empty(), "{}", r.id);
@@ -1694,7 +1711,7 @@ mod testes {
         let lista = regras(&b.conn).unwrap();
         assert_eq!(achar(&lista, &id).origem, "loja");
         assert!(achar(&lista, &id).inicio_informado, "a regra da loja tem o início que o gerente digitou");
-        assert_eq!(lista.len(), 55);
+        assert_eq!(lista.len(), 61);
 
         assert_eq!(ler_data("1/10/26").unwrap().unwrap(), "2026-10-01");
         assert!(ler_data("31/02/2026").is_err());

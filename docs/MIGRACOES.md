@@ -57,6 +57,9 @@ AUD33-N01; decisões DP-47 revista e DP-50). Atualize este documento a cada migr
 | 0029 | `0029_protocolo4_identidade.sql` | protocolo 4 (0.9.19-dev.2): a coluna `caixa_aprovado.dispositivo` (I3, dentro da aprovação assinada) e a tabela local `p4_convite` (A6, convites de uso único) | **não publicada** (linha `0.9.19`). Só aditiva; a assinatura das aprovações da 28 continua valendo (teste `b7_migracao_28_para_29_preserva_assinatura_legada`) |
 | 0030 | `0030_regras_etapa4.sql` | etapa 4 da 0.9.19 Beta: a coluna `vale.acertado` (decisão 6, a compensação do vale usado além do valor) | **não publicada** (linha `0.9.19`). Só aditiva |
 | 0031 | `0031_produto_juncao.sql` | etapa 4 da 0.9.19 Beta (R13): a tabela `produto_juncao` (a peça juntada em outra; viaja) | **não publicada** (linha `0.9.19`). Só aditiva |
+| 0032 | `0032_regras_st_com_fonte.sql` | etapa 3 da 0.9.19 Beta (FIS-P5/P6): colunas `fonte`, `dispositivo`, `consultada_em`, `origem` e `inicio_informado` em `regra_st`; a fonte carimbada só nas 4 regras de SP iguais às da 0002 (fora do log da troca) | **não publicada** (linha `0.9.19`). Só aditiva |
+| 0033 | `0033_nota_fiscal.sql` | etapa 3 da 0.9.19 Beta (FIS-P1/P2): as tabelas `nota_fiscal` e `nota_fiscal_evento` (só deste computador), com o número único por ambiente, modelo e série | **não publicada** (linha `0.9.19`). Só aditiva |
+| 0034 | `0034_raiz_no_circulo.sql` | etapa 4 da 0.9.19 Beta (R8-N8): a visão `produto_raiz` sai e entra a `peca_raiz`, que segue `estoque::raiz` passo a passo (círculo e mais de 64 passos). Nome novo porque uma visão nunca é recriada com o mesmo nome (§4) | **não publicada** (linha `0.9.19`). Só troca uma visão: nenhuma tabela, nenhum registro |
 
 Um número publicado **nunca muda de conteúdo**.
 

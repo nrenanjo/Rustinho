@@ -296,7 +296,9 @@ ColumnLayout {
                         }
                         Nota {
                             // K10 da R2: o número da nota (posições 26 a 34 da chave), e não o fim da chave.
-                            text: "Da nota nº " + parseInt(itemAchado.modelData.a.chaveDaNota.substr(25, 9), 10)
+                            // Cód-10 da R3: sem número legível na chave, não mostra "nº NaN".
+                            readonly property var numeroDaNota: parseInt(String(itemAchado.modelData.a.chaveDaNota).substr(25, 9), 10)
+                            text: (isNaN(numeroDaNota) ? "De uma das notas lidas" : "Da nota nº " + numeroDaNota)
                                   + (itemAchado.modelData.nota ? " · " + itemAchado.modelData.nota : "")
                             font.pixelSize: 13
                             Layout.fillWidth: true

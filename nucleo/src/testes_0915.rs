@@ -1288,9 +1288,11 @@ fn t029_juncao_sem_produto_nao_quebra_as_leituras() {
     crate::faixas::repetidos(&b.conn).expect("as Duplicatas abrem");
     let f = crate::produtos::ficha(&b.conn, &k).expect("a ficha da peça que ficou abre");
     assert_eq!(f.id, k);
+    // Cód-9 da R3: a linha sem `produto_id` não aparece como peça juntada.
+    assert!(f.juntadas.is_empty(), "{:?}", f.juntadas);
 }
 
-/// T021 / R8-N8 (007): a visão `produto_raiz` (que soma as vendas por peça) e `estoque::raiz` (onde o estoque é
+/// T021 / R8-N8 (007): a visão `peca_raiz` (que soma as vendas por peça) e `estoque::raiz` (onde o estoque é
 /// lançado) dão a mesma raiz, inclusive num círculo de junções (o menor id do círculo) e na peça que leva ao círculo.
 #[test]
 fn t021_r8n8_a_raiz_da_visao_e_a_do_estoque_sao_a_mesma() {
@@ -1313,12 +1315,100 @@ fn t021_r8n8_a_raiz_da_visao_e_a_do_estoque_sao_a_mesma() {
     for peca in [a, bb, x, y, c, d] {
         let da_visao: String = b
             .conn
-            .query_row("SELECT COALESCE((SELECT raiz FROM produto_raiz WHERE produto_id = ?1), ?1)", [peca], |l| {
-                l.get(0)
-            })
+            .query_row("SELECT COALESCE((SELECT raiz FROM peca_raiz WHERE produto_id = ?1), ?1)", [peca], |l| l.get(0))
             .unwrap();
         assert_eq!(da_visao, crate::estoque::raiz(&b.conn, peca).unwrap(), "peça {peca}");
     }
     assert_eq!(crate::estoque::raiz(&b.conn, y).unwrap(), *a, "y → x → círculo {{a, b}}: o menor do círculo");
     assert_eq!(crate::estoque::raiz(&b.conn, c).unwrap(), *d);
+}
+
+/// Cód-3 da R3: também acima de 64 passos a visão `peca_raiz` dá a raiz de `estoque::raiz` (que para no passo 64):
+/// uma cadeia de 70 elos, uma cauda de 62 até um círculo de 3 e uma cauda de 30 até um círculo de 40.
+#[test]
+fn r3_cod3_raiz_da_visao_acima_de_64_passos() {
+    use rusqlite::OptionalExtension;
+    let b = Banco::em_memoria().unwrap();
+    let u = crate::faixas::para_testes::configurar(&b, "Caixa 1", 0);
+    let mut ids: Vec<String> = (0..181).map(|i| crate::faixas::para_testes::peca(&b, &u, &format!("P{i}"))).collect();
+    ids.sort();
+    let mut ligacoes: Vec<(String, String)> = Vec::new();
+    // cadeia de 70 elos: 0 → 1 → … → 70
+    for i in 0..70 {
+        ligacoes.push((ids[i].clone(), ids[i + 1].clone()));
+    }
+    // cauda de 62 (71 … 133) até o círculo de 3 (133 → 134 → 135 → 133)
+    for i in 71..135 {
+        ligacoes.push((ids[i].clone(), ids[i + 1].clone()));
+    }
+    ligacoes.push((ids[135].clone(), ids[133].clone()));
+    // cauda de 30 (136 … 166) até o círculo de 40 (166 … 180 e volta por 141): ids fora de ordem dão mais casos
+    for i in 136..180 {
+        ligacoes.push((ids[i].clone(), ids[i + 1].clone()));
+    }
+    ligacoes.push((ids[180].clone(), ids[141].clone()));
+    b.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+    for (de, para) in &ligacoes {
+        b.conn
+            .execute(
+                "INSERT INTO produto_juncao (produto_id, para_id, em, por, motivo) VALUES (?1, ?2, '2026-11-26', NULL, 'x')",
+                [de, para],
+            )
+            .unwrap();
+    }
+    b.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+    let mut diferentes = Vec::new();
+    for (de, _) in &ligacoes {
+        let da_visao: Option<String> = b
+            .conn
+            .query_row("SELECT raiz FROM peca_raiz WHERE produto_id = ?1", [de], |l| l.get(0))
+            .optional()
+            .unwrap()
+            .flatten();
+        let do_estoque = crate::estoque::raiz(&b.conn, de).unwrap();
+        if da_visao.as_deref() != Some(do_estoque.as_str()) {
+            diferentes.push((de.clone(), da_visao, do_estoque));
+        }
+    }
+    assert!(diferentes.is_empty(), "{} peças divergem: {:?}", diferentes.len(), &diferentes[..diferentes.len().min(3)]);
+}
+
+/// Cód-8 da R3: uma loja com dados na estrutura 33 sobe para a 34. Nenhuma tabela perde nem ganha registro; a visão
+/// `produto_raiz` sai e a `peca_raiz` entra, com a raiz certa (inclusive no círculo).
+#[test]
+fn r3_cod8_loja_com_dados_sobe_da_33_para_a_34() {
+    let mut c = Connection::open_in_memory().unwrap();
+    crate::banco::registrar_funcoes(&c).unwrap();
+    crate::banco::migrar_ate(&mut c, 33).unwrap();
+    for (id, nome) in [("a", "Peça A"), ("b", "Peça B"), ("x", "Peça X"), ("k", "Peça K"), ("d", "Peça D")] {
+        c.execute(
+            "INSERT INTO produto (id, codigo, nome, criado_em, atualizado_em, dispositivo)
+             VALUES (?1, ?1, ?2, '2026-11-26', '2026-11-26', 'disp')",
+            params![id, nome],
+        )
+        .unwrap();
+    }
+    for (de, para) in [("a", "b"), ("b", "a"), ("x", "a"), ("d", "k")] {
+        c.execute(
+            "INSERT INTO produto_juncao (produto_id, para_id, em, motivo) VALUES (?1, ?2, '2026-11-26', 'x')",
+            params![de, para],
+        )
+        .unwrap();
+    }
+    let contar = |c: &Connection, t: &str| -> i64 {
+        c.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |l| l.get(0)).unwrap()
+    };
+    let antes = (contar(&c, "produto"), contar(&c, "produto_juncao"));
+    crate::banco::migrar(&mut c).unwrap();
+    assert_eq!(c.query_row("PRAGMA user_version", [], |l| l.get::<_, i64>(0)).unwrap(), 34);
+    assert_eq!((contar(&c, "produto"), contar(&c, "produto_juncao")), antes);
+    let existe = |nome: &str| -> bool {
+        c.query_row("SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'view' AND name = ?1", [nome], |l| l.get(0))
+            .unwrap()
+    };
+    assert!(!existe("produto_raiz") && existe("peca_raiz"));
+    let raiz = |p: &str| -> String {
+        c.query_row("SELECT raiz FROM peca_raiz WHERE produto_id = ?1", [p], |l| l.get(0)).unwrap()
+    };
+    assert_eq!((raiz("a"), raiz("b"), raiz("x"), raiz("d")), ("a".into(), "a".into(), "a".into(), "k".into()));
 }

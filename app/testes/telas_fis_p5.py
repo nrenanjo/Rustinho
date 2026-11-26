@@ -81,6 +81,10 @@ def main():
     tudo_certo = True
     try:
         montar_loja(pasta)
+        # Cód-10 da R3: uma peça com o CSOSN do substituto, para a faixa própria (K9 da R2) aparecer.
+        import telas_importar_cadastros as imp
+        imp.TELA = TELA
+        imp.por_fora(pasta, "UPDATE produto SET csosn = '201' WHERE id = (SELECT id FROM produto WHERE tipo <> 'servico' ORDER BY rowid LIMIT 1);")
         r = Rustinho(pasta, "TelaConfiguracoes", {"secao": "fiscal"}, fotos, "fis-p5")
         try:
             r.entrar("Ana")
@@ -90,6 +94,9 @@ def main():
                                         "CEST 01 · com ST · até 30/09/2026 (início não informado na fonte)",
                                         "Fonte: Portaria SRE 34/2026", "lida em 24/11/2026"],
                                    nao_tem=["desde 01/01/2000"])
+            tudo_certo &= conferir("K9 (R2): a peça com CSOSN de substituto tem faixa própria, com 383 e 600", r.foto("-1s"), r.textos(),
+                                   tem=["Peças com CSOSN de substituto (201, 202, 203)", "rejeição 383", "rejeição 600",
+                                        "não contribuinte do ICMS"])
             tudo_certo &= conferir("FIS-P4: a sequência emissor → certificado → testar → condições, sem repetir", r.foto("-1a"),
                                    r.textos(), tem=["Para emitir notas pelo Rustinho", "1. Emissor fiscal · ainda não disponível",
                                                     "2. Certificado A3 · desligado neste computador", "3. Testar a conexão",

@@ -105,7 +105,7 @@ ColumnLayout {
     function nomeDoEstado(e) {
         return ({ rascunho: "Rascunho", enviada: "Enviada, sem resposta ainda",
                   autorizada: "Autorizada", rejeitada: "Rejeitada", denegada: "Denegada",
-                  desconhecida: "Sem resposta (consultar)", nao_recebida: "Não chegou à SEFAZ",
+                  desconhecida: "Sem resposta da SEFAZ", nao_recebida: "Não chegou à SEFAZ",
                   cancelada: "Cancelada", descartada: "Descartada" })[e] || e
     }
 

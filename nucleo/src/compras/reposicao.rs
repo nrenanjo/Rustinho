@@ -182,7 +182,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
     let forn = fornecedores(conn)?;
     let filtro = texto::normalizar(busca);
     let mut c = conn.prepare(
-        "WITH rz AS MATERIALIZED (SELECT produto_id, raiz FROM produto_raiz WHERE produto_id IS NOT NULL),
+        "WITH rz AS MATERIALIZED (SELECT produto_id, raiz FROM peca_raiz WHERE produto_id IS NOT NULL),
               vend_peca AS (
               SELECT vi.produto_id AS produto_id,
                      SUM(vi.quantidade - COALESCE((SELECT SUM(di.quantidade) FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
@@ -465,7 +465,7 @@ pub fn mais_vendidos(conn: &Connection, dias: i64, ordem: &str, busca: &str) -> 
                 SUM((vi.custo * (vi.quantidade - COALESCE(dv.q, 0)) + 500) / 1000), COALESCE(MAX(est.q), 0), p.estoque_minimo
            FROM venda_item vi
            JOIN venda v ON v.id = vi.venda_id
-           JOIN produto p ON p.id = COALESCE((SELECT r.raiz FROM produto_raiz r WHERE r.produto_id = vi.produto_id), vi.produto_id)
+           JOIN produto p ON p.id = COALESCE((SELECT r.raiz FROM peca_raiz r WHERE r.produto_id = vi.produto_id), vi.produto_id)
            LEFT JOIN est ON est.produto_id = p.id
            LEFT JOIN (SELECT di.venda_item_id, SUM(di.quantidade) AS q, SUM(di.valor_item) AS v
                         FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
@@ -625,7 +625,7 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
     let hoje = fiscal::hoje(conn)?;
     let mut c = conn.prepare(
         "WITH est AS (SELECT produto_id, SUM(quantidade) AS q FROM estoque_movimento GROUP BY produto_id),
-              rz AS MATERIALIZED (SELECT produto_id, raiz FROM produto_raiz WHERE produto_id IS NOT NULL),
+              rz AS MATERIALIZED (SELECT produto_id, raiz FROM peca_raiz WHERE produto_id IS NOT NULL),
               uv_peca AS (SELECT vi.produto_id AS produto_id, MAX(v.criado_em) AS u FROM venda_item vi JOIN venda v ON v.id = vi.venda_id
                       WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND vi.produto_id IS NOT NULL
                       GROUP BY vi.produto_id),

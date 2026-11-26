@@ -820,9 +820,9 @@ fn r7_b5_os_aberta_e_vendas_de_d_contam_para_k() {
     let c = &a.conn;
     assert_eq!(texto(c, "SELECT produto_id FROM ordem_servico_item WHERE ordem_id = ?1", &os), k);
     let vendidas: i64 = c
-        .query_row("SELECT COUNT(*) FROM produto_raiz WHERE produto_id = ?1 AND raiz = ?2", [&d, &k], |l| l.get(0))
+        .query_row("SELECT COUNT(*) FROM peca_raiz WHERE produto_id = ?1 AND raiz = ?2", [&d, &k], |l| l.get(0))
         .unwrap();
-    assert_eq!(vendidas, 1, "a visão produto_raiz leva D a K");
+    assert_eq!(vendidas, 1, "a visão peca_raiz leva D a K");
     let mais = crate::painel::mais_vendidos_para_teste(c).unwrap();
     assert!(
         mais.iter().any(|l| l.nome.starts_with("Amortecedor K") && l.detalhe.starts_with("2 ")),
@@ -918,7 +918,7 @@ fn r8_n4_cadeia_longa_chega_a_raiz() {
     }
     let ultima = pecas.last().unwrap();
     assert_eq!(&estoque::raiz(&a.conn, &pecas[0]).unwrap(), ultima);
-    assert_eq!(texto(&a.conn, "SELECT raiz FROM produto_raiz WHERE produto_id = ?1", &pecas[0]), *ultima);
+    assert_eq!(texto(&a.conn, "SELECT raiz FROM peca_raiz WHERE produto_id = ?1", &pecas[0]), *ultima);
     assert_eq!(saldo(&a.conn, ultima), 13_000);
 }
 

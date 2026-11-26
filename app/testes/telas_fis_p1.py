@@ -84,9 +84,9 @@ def main():
                 raise RuntimeError(f"não achei o aviso das sem resposta (veja {r.saida})")
             time.sleep(1.5)
             tudo_certo &= conferir("FIS-P1: o indicador filtra, com a contagem e o limpar", r.foto("-2"), r.textos(),
-                                   tem=["1 nota · todo o período", "Sem resposta (consultar)"],
+                                   tem=["1 nota · todo o período", "Sem resposta da SEFAZ"],
                                    igual=["Limpar filtros"], nao_tem=["NFC-e 1 (série 1)"])
-            if not clicar_rolando(r, "NFC-e 3 (série 1) · Sem resposta (consultar) · R$ 150,00"):
+            if not clicar_rolando(r, "NFC-e 3 (série 1) · Sem resposta da SEFAZ · R$ 150,00"):
                 raise RuntimeError(f"não achei a nota sem resposta (veja {r.saida})")
             time.sleep(1.5)
             tudo_certo &= conferir("FIS-P2: a sem resposta explica e não reenvia", r.foto("-3"), r.textos(),
