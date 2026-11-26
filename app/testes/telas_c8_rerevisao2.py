@@ -597,6 +597,7 @@ def s6_i1_tres_caixas(placar, fotos):
             # no telas_c8_rerevisao, r2), até 30 s, o limite da s4. A medida (a faixa 0,83–0,93) não muda.
             espera = time.time()
             assentou = r.esperar(lambda: rr.guia_assentada(r.textos()), 30)
+            quando_assentou = time.time()
             print(f"MEDIDA s6: o destaque assentado {time.time() - espera:.1f} s depois da chegada ({assentou})",
                   flush=True)
             com = r.foto("-2")
@@ -623,14 +624,13 @@ def s6_i1_tres_caixas(placar, fotos):
             obs("s6 S-4: textos da linha escolhida:", [(p[4], [round(v) for v in p[:4]]) for p in da_linha])
             ok("s6 (S-4): na linha escolhida, nenhum texto fica por cima de outro",
                len(da_linha) >= 3 and not cobertos, f"{com} {cobertos[:3]}")
-            # "Acaba sozinho": o programa diz que o destaque acabou (6 s depois da chegada, `fimDoDestaque`). B-3 da R9:
-            # a duração é medida e tem teto (12 s desde o assentar: os 6 s do programa com folga para a carga); um
-            # destaque que não some, ou que dura o dobro, reprova.
-            antes_do_fim = time.time()
+            # "Acaba sozinho": o programa diz que o destaque acabou (6 s depois da chegada, `fimDoDestaque`). B-3 da R9 e
+            # B-6 da R10: a duração é medida desde o assentar (e não desde depois das conferências da S-4), com teto de
+            # 10 s (os 6 s do programa com folga para a carga); um destaque que não some, ou que dura o dobro, reprova.
             acabou = r.esperar(lambda: "TESTE_DESTAQUE_ATIVO:0" in {t for _, _, t in r.textos()}, 20)
-            duracao = time.time() - antes_do_fim
+            duracao = time.time() - quando_assentou
             print(f"MEDIDA s6: o destaque acabou {duracao:.1f} s depois de assentar ({acabou})", flush=True)
-            acabou = acabou and duracao <= 12.0
+            acabou = acabou and duracao <= 10.0
             time.sleep(0.6)  # o esmaecer do véu (Tema.duracaoEsmaecer, até 220 ms) termina antes da foto
             sem = r.foto("-3")
             q = razoes(com, sem)
@@ -682,8 +682,16 @@ def s7_sessao_acaba_no_destino(placar, fotos):
             rr.senha_gerente(r, "destino da guia")
             if not ok("s7: com a senha, a guia aparece em Caixas", r.esperar(lambda: r.tem(TITULO_7), 10), r.foto("-1")):
                 return
-            time.sleep(1.5)
+            # T031 da 005 (CI 45867940183, Qt 6.8.3, desenho por software): o roteiro esperava 1,5 s fixos e clicava. Na
+            # CI a rolagem da guia ainda andava (a foto mostrou os ícones dos campos em posições antigas) e o clique só
+            # parou a rolagem: a pergunta não abriu (também a T027 da 007). Agora, como a s4 e o r2 do
+            # telas_c8_rerevisao: espera o que o programa diz (o destaque assentado, nada se movendo), até 30 s, rola, e
+            # espera de novo nada se mover antes do clique.
+            esperou = time.time()
+            assentou7 = r.esperar(lambda: rr.guia_assentada(r.textos()), 30)
+            print(f"MEDIDA s7: a guia assentada {time.time() - esperou:.1f} s depois de aparecer ({assentou7})", flush=True)
             r.rolar_ate("Aceitar como está")
+            r.esperar(lambda: "TESTE_MOVIMENTO_ATIVO:0" in {t for _, _, t in r.textos()}, 15)
             rr.topo(r, "Aceitar como está")
             if not ok("s7: a pergunta do aceite abre", r.esperar(lambda: r.tem("Aceitar como está?")), r.foto("-2")):
                 return

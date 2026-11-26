@@ -126,6 +126,9 @@ def main():
             tudo_certo &= conferir("C-M8: com dois emitentes, pergunta qual é a loja", r.foto("-1"), r.textos(),
                                    tem=["Qual destes CNPJ é o da loja?", f"{LOJA} · 2 notas", f"{FORNECEDOR} · 2 notas",
                                         "4 notas autorizadas lidas, de 2 emitentes"],
+                                   # B-1 da R10: o resumo inteiro (a frase de segurança também está junto do botão,
+                                   # então só o pedaço não provava o ramo dos candidatos).
+                                   igual=["4 notas autorizadas lidas, de 2 emitentes. Nada é gravado sem você confirmar."],
                                    nao_tem=["Regime (CRT)", "Séries usadas", "0 notas autorizadas lidas"])
             if not clicar_na_linha(r, f"{LOJA} · 2 notas", "É o da loja"):
                 raise RuntimeError(f"não achei o É o da loja do CNPJ da loja (foto {r.foto('-instr3')})")
@@ -188,10 +191,10 @@ def main():
                 raise RuntimeError(f"a descoberta só de denegadas não perguntou qual é a loja (foto {r.foto('-instr7')})")
             tudo_certo &= conferir("N-3 (R8): só denegadas, dois emitentes: a pergunta diz \"só notas denegadas\"",
                                    r.foto("-5-denegadas"), r.textos(),
-                                   tem=["Só notas denegadas, de 2 emitentes", f"{LOJA} · só notas denegadas (2)",
-                                        f"{FORNECEDOR} · só 1 nota denegada", "Nada é gravado sem você confirmar."],
+                                   tem=[f"{LOJA} · só 2 notas denegadas", f"{FORNECEDOR} · só 1 nota denegada"],
+                                   igual=["Só notas denegadas, de 2 emitentes. Nada é gravado sem você confirmar."],
                                    nao_tem=[f"{LOJA} · 0 notas", f"{FORNECEDOR} · 0 notas", "0 notas autorizadas lidas"])
-            if not clicar_na_linha(r, f"{LOJA} · só notas denegadas", "É o da loja"):
+            if not clicar_na_linha(r, f"{LOJA} · só 2 notas denegadas", "É o da loja"):
                 raise RuntimeError(f"não achei o É o da loja nas denegadas (foto {r.foto('-instr8')})")
             if not r.esperar("Séries usadas", 15):
                 raise RuntimeError(f"a descoberta das denegadas não leu de novo (foto {r.foto('-instr9')})")

@@ -177,6 +177,12 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
     let mut notas = Vec::new();
     for (nome, conteudo) in arquivos {
         match ler_nota(conteudo) {
+            // B-3 da R10: a nota sem o CNPJ do emitente (por exemplo, emitida com CPF) não é da loja e não vira
+            // candidato com o CNPJ vazio ("É o da loja" com o CNPJ vazio lia de novo sem escolha: a pergunta voltava,
+            // num laço).
+            Ok(n) if crate::documento::limpar(&n.cnpj).is_empty() => {
+                d.ignorados.push(format!("{nome}: sem o CNPJ do emitente (a loja emite com CNPJ)"))
+            }
             Ok(n) => notas.push(n),
             Err(m) => d.ignorados.push(format!("{nome}: {m}")),
         }
@@ -504,6 +510,48 @@ mod testes {
             ]
         );
         assert!(d.cnpj.is_none() && d.crt.is_none() && d.series.is_empty(), "nada sai antes da escolha: {d:?}");
+    }
+
+    /// B-3 da R10: uma nota emitida sem CNPJ (com CPF) vai para os ignorados e não vira candidato com o CNPJ vazio.
+    #[test]
+    fn t031_b3_emitente_sem_cnpj_fica_de_lado() {
+        let com_cpf = nfce(9, 1, "000001", "1").replace("<CNPJ>11222333000181</CNPJ>", "<CPF>12345678909</CPF>");
+        let d = descobrir_de_xml(&[("a.xml".into(), nfce(41, 1, "000001", "1")), ("b.xml".into(), com_cpf)], "");
+        assert!(d.candidatos.is_empty(), "{:?}", d.candidatos);
+        assert_eq!(
+            d.cnpj.as_ref().map(|a| a.valor.as_str()),
+            Some("11222333000181"),
+            "a loja é o único emitente com CNPJ"
+        );
+        assert_eq!(d.ignorados.len(), 1);
+        assert!(d.ignorados[0].contains("sem o CNPJ do emitente"), "{:?}", d.ignorados);
+    }
+
+    /// B-4 da R10 (EA): um emitente só, com autorizadas e denegadas, sem o CNPJ da loja: ele é a loja, sem perguntar; o
+    /// piso conta a denegada e a contagem, só as autorizadas.
+    #[test]
+    fn t031_b4_ea_um_emitente_com_autorizada_e_denegada_segue_sozinho() {
+        let denegada = nfce(45, 1, "000001", "1").replace("<cStat>100</cStat>", "<cStat>302</cStat>");
+        let d = descobrir_de_xml(&[("a.xml".into(), nfce(41, 1, "000001", "1")), ("b.xml".into(), denegada)], "");
+        assert!(d.candidatos.is_empty(), "{:?}", d.candidatos);
+        assert_eq!(d.series, vec![Serie { ambiente: 1, modelo: 65, serie: 1, ultimo_numero: 45, notas: 1 }]);
+    }
+
+    /// B-4 da R10 (EB, mudança da E6 registrada na T031): a loja com autorizadas e um fornecedor só com denegada, sem o
+    /// CNPJ da loja: agora a tela pergunta (antes da T030, o fornecedor ficava de fora sem pergunta). É o lado seguro.
+    #[test]
+    fn t031_b4_eb_autorizadas_e_fornecedor_so_denegado_pergunta() {
+        let fornecedor = nfce(7, 1, "000001", "3")
+            .replace("11222333000181", "99888777000166")
+            .replace("<cStat>100</cStat>", "<cStat>302</cStat>");
+        let d = descobrir_de_xml(&[("a.xml".into(), nfce(41, 1, "000001", "1")), ("b.xml".into(), fornecedor)], "");
+        assert_eq!(
+            d.candidatos,
+            vec![
+                Candidato { cnpj: "11222333000181".into(), notas: 1, denegadas: 0 },
+                Candidato { cnpj: "99888777000166".into(), notas: 0, denegadas: 1 }
+            ]
+        );
     }
 
     /// N-3 da R8: dois emitentes só com notas denegadas: os dois viram candidatos, com 0 autorizadas e as denegadas

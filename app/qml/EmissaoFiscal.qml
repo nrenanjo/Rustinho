@@ -182,8 +182,9 @@ ColumnLayout {
         // passos passavam da borda da tela). B-6 da R9 (U1): a frase ao lado diz o que o botão faz, o que o rótulo curto
         // deixou de dizer.
         Nota {
-            text: "Para preencher estes dados, o Rustinho pode ler os arquivos XML das notas que a loja já emitiu pelo "
-                  + "sistema de hoje. Nada é gravado sem você confirmar."
+            // B-7 da R10: diz quais dados.
+            text: "O Rustinho pode ler os arquivos XML das notas que a loja já emitiu pelo sistema de hoje e trazer daí "
+                  + "o CNPJ, o regime, a série e o último número. Nada é gravado sem você confirmar."
             font.pixelSize: 14
             Layout.fillWidth: true
         }
@@ -214,6 +215,8 @@ ColumnLayout {
         width: Math.min(680, Tema.largura - 24)
         readonly property var d: emissao.achado ? emissao.achado.descoberta : null
         readonly property var loja: emissao.achado ? emissao.achado.loja : null
+        // Soma das autorizadas dos emitentes da pergunta (o resumo, B-2 da R10).
+        readonly property int somaAutorizadas: !d ? 0 : d.candidatos.reduce((t, c) => t + c.notas, 0)
         contentItem: Flickable {
             implicitHeight: Math.min(colunaDescoberta.implicitHeight, painelDescoberta.alturaMaxima - 40)
             contentHeight: colunaDescoberta.implicitHeight
@@ -229,12 +232,15 @@ ColumnLayout {
                           // B-6 da R9: com ou sem a pergunta, o resumo termina igual (antes, pela precedência do "?:", o
                           // ramo dos candidatos ficava sem o ponto e sem "Nada é gravado sem você confirmar").
                           : (painelDescoberta.d.candidatos.length > 0
-                             ? (painelDescoberta.d.candidatos.reduce((t, c) => t + c.notas, 0) === 0
+                             ? (painelDescoberta.somaAutorizadas === 0
                                 ? "Só notas denegadas, de " + painelDescoberta.d.candidatos.length + " emitentes"
-                                : painelDescoberta.d.candidatos.reduce((t, c) => t + c.notas, 0) + " notas autorizadas lidas, de "
+                                // B-2 da R10: o singular também com a pergunta.
+                                : (painelDescoberta.somaAutorizadas === 1 ? "1 nota autorizada lida, de "
+                                   : painelDescoberta.somaAutorizadas + " notas autorizadas lidas, de ")
                                   + painelDescoberta.d.candidatos.length + " emitentes")
                              : (painelDescoberta.d.lidas === 1 ? "1 nota autorizada lida" : painelDescoberta.d.lidas + " notas autorizadas lidas"))
-                          + (painelDescoberta.d.ignorados.length ? " · " + painelDescoberta.d.ignorados.length + " arquivos deixados de lado (não autorizados, de outro emitente ou sem leitura)" : "")
+                          + (painelDescoberta.d.ignorados.length === 1 ? " · 1 arquivo deixado de lado (não autorizado, de outro emitente ou sem leitura)"
+                             : painelDescoberta.d.ignorados.length ? " · " + painelDescoberta.d.ignorados.length + " arquivos deixados de lado (não autorizados, de outro emitente ou sem leitura)" : "")
                           + ". Nada é gravado sem você confirmar."
                     font.pixelSize: 14
                     Layout.fillWidth: true
@@ -265,8 +271,9 @@ ColumnLayout {
                             // N-3 da R8: o emitente só com denegadas não aparece como "0 notas".
                             text: linhaCandidato.modelData.cnpj + " · "
                                   + (linhaCandidato.modelData.notas === 0
+                                     // B-7 da R10: o mesmo formato no singular e no plural.
                                      ? (linhaCandidato.modelData.denegadas === 1 ? "só 1 nota denegada"
-                                        : "só notas denegadas (" + linhaCandidato.modelData.denegadas + ")")
+                                        : "só " + linhaCandidato.modelData.denegadas + " notas denegadas")
                                      : linhaCandidato.modelData.notas + (linhaCandidato.modelData.notas === 1 ? " nota" : " notas"))
                             textFormat: Text.PlainText
                             color: Tema.tinta
