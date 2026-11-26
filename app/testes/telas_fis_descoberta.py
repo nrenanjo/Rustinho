@@ -130,7 +130,7 @@ def main():
                                    nao_tem=["Qual destes CNPJ é o da loja?", FORNECEDOR])
             if not clicar_rolando(r, "Usar esta série"):
                 raise RuntimeError(f"não achei o Usar esta série (foto {r.foto('-instr5')})")
-            if not r.esperar("A série da NFC-e confirmado", 15):
+            if not r.esperar("Gravado: Série da NFC-e.", 15):
                 tudo_certo = False
                 print(f"✘ C-M4: o Usar esta série não confirmou (foto {r.foto('-3')})")
         finally:

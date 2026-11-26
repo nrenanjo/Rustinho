@@ -119,6 +119,9 @@ ColumnLayout {
                              if (r.ok) {
                                  detalhe = r.dados
                                  carregar()
+                             } else {
+                                 // K11 da R2: o erro do descarte aparece (a nota pode ter mudado de estado).
+                                 janela.avisar(r.erro, "erro")
                              }
                          }), "perigo")
     }
@@ -209,8 +212,9 @@ ColumnLayout {
         }
         Botao {
             visible: !!secao.painel && secao.painel.semResposta > 0
-            text: !secao.painel ? "" : (secao.painel.semResposta === 1 ? "1 nota sem resposta da SEFAZ: consultar"
-                                                                         : secao.painel.semResposta + " notas sem resposta da SEFAZ: consultar")
+            // K10 da R2: a consulta na SEFAZ chega com o emissor; até lá, o aviso só mostra quais são.
+            text: !secao.painel ? "" : (secao.painel.semResposta === 1 ? "1 nota sem resposta da SEFAZ: ver qual é"
+                                                                         : secao.painel.semResposta + " notas sem resposta da SEFAZ: ver quais são")
             tipo: secao.indicador === "sem_resposta" ? "principal" : "secundario"
             onClicked: {
                 secao.indicador = secao.indicador === "sem_resposta" ? "" : "sem_resposta"

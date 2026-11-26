@@ -41,7 +41,7 @@ ColumnLayout {
         emissao.janela.chamarGerente("fiscal_descoberta_usar", { campo: campo, valor: String(valor),
                                                                  ambiente: ambiente || 0, ultimoNumero: ultimoNumero || 0 }, r => {
             if (r.ok)
-                emissao.janela.avisar(nome + " confirmado.", "ok")
+                emissao.janela.avisar("Gravado: " + nome + ".", "ok")
             else
                 emissao.janela.avisar(r.erro, "erro")
         })
@@ -54,14 +54,14 @@ ColumnLayout {
 
     function confere(achadoValor, daLoja) {
         if (!daLoja)
-            return "a loja ainda não informou"
+            return "a loja ainda não informou (informe em Configurações › Loja)"
         return achadoValor === daLoja ? "confere com o da loja" : "diferente do informado em Loja: confira lá"
     }
     readonly property var passos: [
         { titulo: "1. Emissor fiscal", situacao: "ainda não disponível", pronto: false,
-          explicacao: "A ligação com o emissor (o ACBrMonitorPLUS deste computador) ainda não está pronta nesta versão." },
+          explicacao: "A ligação com o emissor (o programa ACBrMonitorPLUS, que assina e envia as notas à SEFAZ neste computador) ainda não está pronta nesta versão." },
         { titulo: "2. Certificado A3", situacao: ligado ? "liberado neste computador" : "desligado neste computador", pronto: ligado,
-          explicacao: ligado ? "Um gerente liberou o uso do certificado A3 aqui." : "Um gerente liga em \"Certificado A3 e integração fiscal\", acima." },
+          explicacao: ligado ? "Um gerente liberou o uso do certificado A3 aqui." : "Um gerente liga no quadro \"Certificado A3 e integração fiscal\", nesta mesma tela." },
         { titulo: "3. Testar a conexão", situacao: "depois dos passos 1 e 2", pronto: false,
           explicacao: "O Rustinho confere a ligação com a SEFAZ em homologação, sem nota de verdade." },
         { titulo: "4. Condições para emitir", situacao: lojaPronta && semNcm === 0 ? "cadastro em dia" : "falta acertar", pronto: false,
@@ -295,7 +295,9 @@ ColumnLayout {
                             Layout.fillWidth: true
                         }
                         Nota {
-                            text: "Da nota " + itemAchado.modelData.a.chaveDaNota.slice(-12) + (itemAchado.modelData.nota ? " · " + itemAchado.modelData.nota : "")
+                            // K10 da R2: o número da nota (posições 26 a 34 da chave), e não o fim da chave.
+                            text: "Da nota nº " + parseInt(itemAchado.modelData.a.chaveDaNota.substr(25, 9), 10)
+                                  + (itemAchado.modelData.nota ? " · " + itemAchado.modelData.nota : "")
                             font.pixelSize: 13
                             Layout.fillWidth: true
                         }
@@ -320,8 +322,10 @@ ColumnLayout {
                                   + (linhaSerie.modelData.ambiente === 1 ? " (produção)" : " (homologação)")
                                   + ": último número " + linhaSerie.modelData.ultimoNumero + " · " + linhaSerie.modelData.notas
                                   + (linhaSerie.modelData.notas === 1 ? " nota" : " notas")
+                                  // K5 da R2: o último número é o das notas desta pasta.
                                   + (linhaSerie.modelData.ambiente === 1 ? ". Usando esta série, a próxima nota do Rustinho sai depois da "
-                                                                           + linhaSerie.modelData.ultimoNumero + "." : "")
+                                                                           + linhaSerie.modelData.ultimoNumero
+                                                                           + " (o maior número nas notas desta pasta: confira que ela tem as notas mais recentes)." : "")
                             textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
@@ -335,7 +339,7 @@ ColumnLayout {
                             text: "Usar esta série"
                             tipo: "discreto"
                             onClicked: emissao.usar(linhaSerie.modelData.modelo === 65 ? "serieNfce" : "serieNfe", linhaSerie.modelData.serie,
-                                                    "A série da " + (linhaSerie.modelData.modelo === 65 ? "NFC-e" : "NF-e"),
+                                                    "Série da " + (linhaSerie.modelData.modelo === 65 ? "NFC-e" : "NF-e"),
                                                     linhaSerie.modelData.ambiente, linhaSerie.modelData.ultimoNumero)
                         }
                     }

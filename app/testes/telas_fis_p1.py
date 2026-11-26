@@ -74,13 +74,13 @@ def main():
                                    tem=["Ambiente: homologação (teste, sem valor fiscal)",
                                         "Configurado, conectado, válido e testado: os quatro chegam junto com o emissor."],
                                    igual=["Autorizadas: 1", "Pendentes: 2", "Rejeitadas: 1", "Canceladas: 1",
-                                          "1 nota sem resposta da SEFAZ: consultar"],
+                                          "1 nota sem resposta da SEFAZ: ver qual é"],
                                    nao_tem=["ainda não · ", "Sem resposta: 1"])
             tudo_certo &= conferir("FIS-P1: o CPF/CNPJ fica escondido", r.foto("-1b"), textos,
                                    tem=["documento escondido", "5 notas · todo o período", "NFC-e sem número (série 1) · Rascunho",
                                         "NFC-e 4 (série 1) · Cancelada"],
                                    nao_tem=["12345678909", "NFC-e 0 (série 1)", "Nenhuma pendência fiscal"])
-            if not clicar_rolando(r, "1 nota sem resposta da SEFAZ: consultar"):
+            if not clicar_rolando(r, "1 nota sem resposta da SEFAZ: ver qual é"):
                 raise RuntimeError(f"não achei o aviso das sem resposta (veja {r.saida})")
             time.sleep(1.5)
             tudo_certo &= conferir("FIS-P1: o indicador filtra, com a contagem e o limpar", r.foto("-2"), r.textos(),
@@ -132,6 +132,18 @@ def main():
             time.sleep(1)
             tudo_certo &= conferir("FIS-P3: com impedimento, o ambiente continua o mesmo", r.foto("-6"), r.textos(),
                                    tem=["Ambiente: homologação (teste, sem valor fiscal)"], nao_tem=["Ambiente fiscal trocado."])
+            # K12 da R2: o controle positivo do jeito de clicar e digitar usado acima. No campo ligado ("Procurar"), o
+            # mesmo clique (34 px abaixo do rótulo) e a mesma digitação fazem o texto aparecer; assim, o "não apareceu"
+            # da confirmação desligada prova que ela estava desligada, e não que o clique errou o alvo.
+            procurar = [(x, y) for x, y, t in r.textos_para_clicar() if t == "Procurar (número, nome ou chave)"]
+            if not procurar:
+                raise RuntimeError(f"não achei o campo Procurar (veja {r.saida})")
+            xdo("mousemove", str(procurar[-1][0]), str(procurar[-1][1] + 34), "click", "1")
+            time.sleep(0.5)
+            xdo("type", "--delay", "40", "zqxwvk")
+            time.sleep(1.5)
+            tudo_certo &= conferir("K12: no campo ligado, o mesmo clique e a mesma digitação fazem o texto aparecer",
+                                   r.foto("-7"), r.textos(), tem=["zqxwvk"])
         finally:
             r.fechar()
     finally:

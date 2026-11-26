@@ -121,7 +121,7 @@ pub fn tributacao(conn: &Connection, uf: &str, cest: &str, csosn_peca: &str, dat
         // F2-4 da R1 (MOC 7.0, Anexo I: N12a-20, rejeição 383; N12a-40 e N12a-44; N12a-70): o substituto só existe na
         // NF-e para contribuinte; na NFC-e e na NF-e para consumidor a SEFAZ recusa.
         ("201" | "202" | "203", _) => format!(
-            "CSOSN {csosn} (a loja cobra a ST) só vale na NF-e para empresa contribuinte. Na NFC-e do balcão e na NF-e para consumidor a SEFAZ recusa (rejeição 383). Confirme com o contador."
+            "CSOSN {csosn} (a loja cobra a ST) só vale na NF-e para empresa contribuinte. Na NFC-e do balcão a SEFAZ recusa (rejeição 383) e na NF-e para consumidor também (rejeição 600). Confirme com o contador."
         ),
         ("500", Some(false)) => format!(
             "Esta peça está com CSOSN 500, mas pela regra de {uf} ela não tem mais ST nesta data. O certo deve ser 102 (CFOP 5102). Confirme com o contador."
@@ -205,6 +205,9 @@ pub struct Conferencia {
     pub sem_cest: Vec<PecaFiscal>,
     /// C-M7 da R1: peças sem CSOSN escolhido à mão e sem regra que decida (o CSOSN fica a definir com o contador).
     pub a_definir: Vec<PecaFiscal>,
+    /// K9 da R2: peças com o CSOSN do substituto (201, 202, 203): valem só na NF-e para contribuinte. Lista própria, sem
+    /// o "Passar para automático" (a 201 pode ser certa para a loja que é substituta).
+    pub substituto: Vec<PecaFiscal>,
     /// C-M6 da R1: as regras do programa que não entraram (a loja tem regra própria no mesmo período).
     pub regras_puladas: Vec<String>,
     pub monofasicas: i64,
@@ -228,6 +231,7 @@ pub fn conferir(conn: &Connection, data: &str) -> Resultado<Conferencia> {
     let mut sem_ncm = Vec::new();
     let mut sem_cest = Vec::new();
     let mut a_definir = Vec::new();
+    let mut substituto = Vec::new();
     for (id, codigo, nome, marca, ncm, cest, csosn) in &pecas {
         let t = tributacao(conn, &uf, cest, csosn, data)?;
         let item = |motivo: String| PecaFiscal {
@@ -252,7 +256,9 @@ pub fn conferir(conn: &Connection, data: &str) -> Resultado<Conferencia> {
             cfop: t.cfop.clone(),
             motivo,
         };
-        if !t.alerta.is_empty() {
+        if matches!(t.csosn.as_str(), "201" | "202" | "203") {
+            substituto.push(item(t.alerta.clone()));
+        } else if !t.alerta.is_empty() {
             conflitos.push(item(t.explicacao.clone()));
         }
         if !t.decidido {
@@ -279,6 +285,7 @@ pub fn conferir(conn: &Connection, data: &str) -> Resultado<Conferencia> {
         sem_ncm,
         sem_cest,
         a_definir,
+        substituto,
         regras_puladas: config::ler(conn, CHAVE_PULADAS)?
             .unwrap_or_default()
             .lines()
@@ -1289,6 +1296,21 @@ mod testes {
         let c = chamar(&mut s, "fiscal_conferir", json!({}));
         let lista = c["aDefinir"].as_array().unwrap();
         assert!(lista.iter().any(|p| p["nome"] == "Filtro sem CEST" && p["csosn"] == "a definir"), "{c}");
+        // K9 da R2: a peça com CSOSN do substituto vai para a lista própria, e não para "não combina com a regra"
+        // (onde o "Passar todas para automático" a trocaria).
+        let mut f = chamar(&mut s, "produto_novo", json!({}));
+        f["nome"] = json!("Peça substituta");
+        f["custo"] = json!("10");
+        f["csosn"] = json!("201");
+        f["chaveOperacao"] = json!("peca-k9");
+        chamar(&mut s, "produto_salvar", f);
+        let c = chamar(&mut s, "fiscal_conferir", json!({}));
+        let sub = c["substituto"].as_array().unwrap();
+        assert!(
+            sub.iter().any(|p| p["nome"] == "Peça substituta" && p["motivo"].as_str().unwrap().contains("600")),
+            "{c}"
+        );
+        assert!(!c["conflitos"].as_array().unwrap().iter().any(|p| p["nome"] == "Peça substituta"), "{c}");
     }
 
     #[test]
@@ -1359,7 +1381,7 @@ mod testes {
     fn fis_p6_o_catalogo_do_programa_entra_uma_vez_e_respeita_a_loja() {
         let b = Banco::em_memoria().unwrap();
         let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
-        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("2"));
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("3"));
         assert_eq!(carregar_regras_do_programa(&b.conn).unwrap(), 0, "a mesma versão não aplica de novo");
         // A regra que saiu deste banco (por exemplo, a exclusão que veio de outro caixa) não volta na mesma versão.
         b.conn.execute("DELETE FROM regra_st WHERE id = 'ba-pneus-com-st'", []).unwrap();
@@ -1409,10 +1431,16 @@ mod testes {
             assert_eq!(st(uf, "16.001.00"), Some(true), "{uf}: pneu de automóvel");
             assert_eq!(st(uf, "16.006.00"), Some(false), "{uf}: recauchutado fora da lista");
         }
-        for uf in ["GO", "RR"] {
+        for uf in ["GO", "RR", "PB", "RN"] {
             assert_eq!(st(uf, "16.005.00"), Some(false), "{uf}: pneu de bicicleta");
             assert_eq!(st(uf, "16.009.00"), Some(false), "{uf}: câmara de bicicleta");
         }
+        // N1 da R2: PB e RN também deixam de fora o protetor de bicicleta (RR e GO o mantêm).
+        for uf in ["PB", "RN"] {
+            assert_eq!(st(uf, "16.007.01"), Some(false), "{uf}: protetor de bicicleta");
+            assert_eq!(st(uf, "16.007.00"), Some(true), "{uf}: protetor comum continua");
+        }
+        assert_eq!(st("BA", "16.005.00"), Some(true), "BA traz o de bicicleta (item 10.5)");
         assert_eq!(st("RR", "16.007.01"), Some(true), "RR: protetor de bicicleta continua");
         assert_eq!(st("RR", "16.008.00"), Some(true));
         assert_eq!(st("PR", "16.005.00"), Some(true), "PR traz o de bicicleta");
@@ -1552,7 +1580,7 @@ mod testes {
         b.conn.execute_batch("DROP TRIGGER t_b6;").unwrap();
         drop(b);
         let b = Banco::abrir(&caminho).unwrap();
-        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("2"), "a próxima abertura aplica");
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("3"), "a próxima abertura aplica");
         assert!(regras(&b.conn).unwrap().iter().any(|r| r.id == "go-pneus-com-st"));
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
@@ -1565,7 +1593,11 @@ mod testes {
         for csosn in ["201", "202", "203"] {
             let t = tributacao(&b.conn, "SP", "01.001.00", csosn, "2026-11-26").unwrap();
             assert_eq!(t.cfop, "5403");
-            assert!(t.alerta.contains("só vale na NF-e") && t.alerta.contains("383"), "{csosn}: {}", t.alerta);
+            assert!(
+                t.alerta.contains("só vale na NF-e") && t.alerta.contains("383") && t.alerta.contains("600"),
+                "{csosn}: {}",
+                t.alerta
+            );
         }
         assert!(tributacao(&b.conn, "SP", "01.001.00", "102", "2026-11-26").unwrap().alerta.is_empty());
         // G5: o monofásico vale até 31/12/2026.
@@ -1620,7 +1652,7 @@ mod testes {
     fn fis_p6_as_regras_do_programa_tem_fonte() {
         let b = Banco::em_memoria().unwrap();
         let lista = regras(&b.conn).unwrap();
-        assert_eq!(lista.len(), 48, "4 de SP (0002/0032) e 44 do catálogo, versão 2");
+        assert_eq!(lista.len(), 54, "4 de SP (0002/0032) e 50 do catálogo, versão 3");
         for r in &lista {
             assert_eq!(r.origem, "rustinho", "{}", r.id);
             assert!(!r.fonte.is_empty() && !r.dispositivo.is_empty() && !r.consultada_em.is_empty(), "{}", r.id);
@@ -1662,7 +1694,7 @@ mod testes {
         let lista = regras(&b.conn).unwrap();
         assert_eq!(achar(&lista, &id).origem, "loja");
         assert!(achar(&lista, &id).inicio_informado, "a regra da loja tem o início que o gerente digitou");
-        assert_eq!(lista.len(), 49);
+        assert_eq!(lista.len(), 55);
 
         assert_eq!(ler_data("1/10/26").unwrap().unwrap(), "2026-10-01");
         assert!(ler_data("31/02/2026").is_err());

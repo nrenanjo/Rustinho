@@ -1,6 +1,6 @@
 {
- "versao": 2,
- "nota": "Regras de ST que vêm com o Rustinho (FIS-P5 e FIS-P6, 0.9.19, etapa 3): só UFs com a vigência confirmada na fonte oficial (matriz _reversa_sdd/auditoria_fiscal_0919/03v2_…). Quando a fonte não informa o início, a regra começa na data em que foi conferida valendo e fica com inicioInformado = false (a tela não mostra essa data como legal). Uma linha entra uma vez só (desdeVersao maior que a versão já aplicada neste computador) e nunca sobrescreve uma linha mudada na loja. Versão 2 (R1, 26/11/2026): inicioInformado em cada linha; as exceções da lista de cada UF no segmento 16 (PR, SC, PB, BA, RN, GO e RR) como linhas \"sem ST\" de CEST mais longo; versaoDaLinha corrige a linha do programa que a loja não mudou.",
+ "versao": 3,
+ "nota": "Regras de ST que vêm com o Rustinho (FIS-P5 e FIS-P6, 0.9.19, etapa 3): só UFs com a vigência confirmada na fonte oficial (matriz _reversa_sdd/auditoria_fiscal_0919/03v2_…). Quando a fonte não informa o início, a regra começa na data em que foi conferida valendo e fica com inicioInformado = false (a tela não mostra essa data como legal). Uma linha entra uma vez só (desdeVersao maior que a versão já aplicada neste computador) e nunca sobrescreve uma linha mudada na loja. Versão 2 (R1, 26/11/2026): inicioInformado em cada linha; as exceções da lista de cada UF no segmento 16 (PR, SC, PB, BA, RN, GO e RR) como linhas \"sem ST\" de CEST mais longo; versaoDaLinha corrige a linha do programa que a loja não mudou. Versão 3 (R2, 26/11/2026): PB e RN também deixam de fora os itens de bicicleta (16.005.00, 16.007.01 e 16.009.00).",
  "regras": [
   {
    "id": "rs-autopecas-sem-st",
@@ -661,6 +661,96 @@
    "desdeVersao": 2,
    "inicioInformado": false,
    "versaoDaLinha": 2
+  },
+  {
+   "id": "pb-pneus-16005-sem-st",
+   "uf": "PB",
+   "cestInicio": "16005",
+   "vigenteDe": "2024-01-01",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus novos de bicicleta (CEST 16.005.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/PB, Anexo 05 atualizado até o Dec. 46.791/2025 (sefaz.pb.gov.br)",
+   "dispositivo": "Anexo 05, segmento CEST 16: só os itens 1.0, 2.0, 3.0, 4.0, 7.0 e 8.0 (os de bicicleta aparecem só no \"exceto\")",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 3,
+   "inicioInformado": false,
+   "versaoDaLinha": 3
+  },
+  {
+   "id": "pb-pneus-1600701-sem-st",
+   "uf": "PB",
+   "cestInicio": "1600701",
+   "vigenteDe": "2024-01-01",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Protetores de borracha de bicicleta (CEST 16.007.01) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/PB, Anexo 05 atualizado até o Dec. 46.791/2025 (sefaz.pb.gov.br)",
+   "dispositivo": "Anexo 05, segmento CEST 16: só os itens 1.0, 2.0, 3.0, 4.0, 7.0 e 8.0 (os de bicicleta aparecem só no \"exceto\")",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 3,
+   "inicioInformado": false,
+   "versaoDaLinha": 3
+  },
+  {
+   "id": "pb-pneus-16009-sem-st",
+   "uf": "PB",
+   "cestInicio": "16009",
+   "vigenteDe": "2024-01-01",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Câmaras de ar de bicicleta (CEST 16.009.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/PB, Anexo 05 atualizado até o Dec. 46.791/2025 (sefaz.pb.gov.br)",
+   "dispositivo": "Anexo 05, segmento CEST 16: só os itens 1.0, 2.0, 3.0, 4.0, 7.0 e 8.0 (os de bicicleta aparecem só no \"exceto\")",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 3,
+   "inicioInformado": false,
+   "versaoDaLinha": 3
+  },
+  {
+   "id": "rn-pneus-16005-sem-st",
+   "uf": "RN",
+   "cestInicio": "16005",
+   "vigenteDe": "2023-11-01",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Pneus novos de bicicleta (CEST 16.005.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/RN, Anexo 007 atualizado até o Dec. 36.041/2026 (sefaz.rn.gov.br)",
+   "dispositivo": "Anexo 007, § 7º: \"os itens abrangidos … são os constantes do quadro abaixo\" (1.0, 2.0, 3.0, 4.0, 7.0 e 8.0)",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 3,
+   "inicioInformado": false,
+   "versaoDaLinha": 3
+  },
+  {
+   "id": "rn-pneus-1600701-sem-st",
+   "uf": "RN",
+   "cestInicio": "1600701",
+   "vigenteDe": "2023-11-01",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Protetores de borracha de bicicleta (CEST 16.007.01) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/RN, Anexo 007 atualizado até o Dec. 36.041/2026 (sefaz.rn.gov.br)",
+   "dispositivo": "Anexo 007, § 7º: \"os itens abrangidos … são os constantes do quadro abaixo\" (1.0, 2.0, 3.0, 4.0, 7.0 e 8.0)",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 3,
+   "inicioInformado": false,
+   "versaoDaLinha": 3
+  },
+  {
+   "id": "rn-pneus-16009-sem-st",
+   "uf": "RN",
+   "cestInicio": "16009",
+   "vigenteDe": "2023-11-01",
+   "vigenteAte": null,
+   "comSt": false,
+   "descricao": "Câmaras de ar de bicicleta (CEST 16.009.00) fora da ST: a lista da UF não traz este item",
+   "fonte": "RICMS/RN, Anexo 007 atualizado até o Dec. 36.041/2026 (sefaz.rn.gov.br)",
+   "dispositivo": "Anexo 007, § 7º: \"os itens abrangidos … são os constantes do quadro abaixo\" (1.0, 2.0, 3.0, 4.0, 7.0 e 8.0)",
+   "consultadaEm": "2026-11-26",
+   "desdeVersao": 3,
+   "inicioInformado": false,
+   "versaoDaLinha": 3
   }
  ]
 }

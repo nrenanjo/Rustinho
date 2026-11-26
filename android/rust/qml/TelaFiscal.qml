@@ -415,6 +415,25 @@ FocusScope {
                         }
                     }
 
+                    // K9 da R2: o CSOSN do substituto (201, 202, 203) vale só na NF-e para empresa contribuinte. Faixa própria,
+                    // com o motivo e sem o "Passar todas para automático" (a 201 pode estar certa para a loja substituta).
+                    Faixa {
+                        readonly property int n: tela.dados ? tela.dados.substituto.length : 0
+                        visible: n > 0
+                        titulo: "Peças com CSOSN de substituto (201, 202, 203)"
+                        subtitulo: "valem só na NF-e para empresa contribuinte"
+                        color: Tema.pergaminho
+                        Layout.fillWidth: true
+                        Nota {
+                            text: "Na NFC-e do balcão a SEFAZ recusa estas peças (rejeição 383), e na NF-e para consumidor também "
+                                  + "(rejeição 600). Se a loja é substituta e vende para outras empresas, elas podem estar certas: "
+                                  + "confirme com o contador."
+                            font.pixelSize: 14
+                            Layout.fillWidth: true
+                        }
+                        ListaPecas { pecas: tela.dados ? tela.dados.substituto : [] }
+                    }
+
                     // C-M7 da R1: sem regra que decida e sem CSOSN escolhido à mão, o Rustinho não presume.
                     Faixa {
                         readonly property int n: tela.dados ? tela.dados.aDefinir.length : 0

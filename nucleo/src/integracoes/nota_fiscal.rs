@@ -38,17 +38,20 @@ pub enum Origem {
     Consulta,
 }
 
-/// Os códigos de rejeição que **não** dizem que a nota ficou fora da SEFAZ (MOC 7.0, Anexo I, tabela 4.4.2): a
-/// duplicidade (204 e 539: a nota pode já estar autorizada), a nota já denegada na base (205), a chave diferente da
-/// existente (613), o consumo indevido (656: a SEFAZ nem olhou), o erro não catalogado (999) e o "NF-e não consta na
-/// base de dados" (217), que só tem sentido na consulta.
-const REJEICAO_NAO_CONCLUSIVA: &[&str] = &["204", "205", "217", "539", "613", "656", "999"];
+/// Os códigos de rejeição que **não** dizem que a nota ficou fora da SEFAZ (MOC 7.0, Anexo I): a duplicidade (204 e
+/// 539: a nota pode já estar autorizada), a nota já denegada (205), já inutilizada (206), já cancelada (218) ou com o
+/// mesmo número já transmitida e aguardando (635) na base (K2 da R2: o número já existe lá e não pode voltar), o "NF-e
+/// não consta na base" (217, que só tem sentido na consulta), a chave diferente da existente (613), o consumo indevido
+/// (656: a SEFAZ nem olhou) e o erro não catalogado (999).
+const REJEICAO_NAO_CONCLUSIVA: &[&str] = &["204", "205", "206", "217", "218", "539", "613", "635", "656", "999"];
 
-/// O que uma resposta da SEFAZ quer dizer para a nota (MOC 7.0, Anexo I, tabelas 4.4.1 e 4.4.2):
-/// - 100 e 150: autorizada; 110, 301, 302 e 303: denegada;
-/// - na consulta: 101, 151 e 155, cancelada; 217 ("NF-e não consta na base de dados da SEFAZ"), não recebida;
-/// - no envio: um código de rejeição (142, ou de 201 a 999, fora os de [`REJEICAO_NAO_CONCLUSIVA`]), rejeitada;
-/// - todo o resto (103, 104, 105 e 106 do lote, 108 e 109 do serviço parado, código fora da tabela) não é conclusivo:
+/// O que uma resposta da SEFAZ quer dizer para a nota:
+/// - 100 e 150 (MOC 7.0, Anexo I, 4.4.1): autorizada; 110 (4.4.1) e 301, 302 e 303 (4.4.3): denegada;
+/// - na consulta: 101 e 151 (4.4.1) e 155 (Visão Geral, 5.9.4), cancelada; 217 ("NF-e não consta na base de dados da
+///   SEFAZ"), não recebida;
+/// - no envio, rejeitada: um código de rejeição (142, de 201 a 999, os de 4 dígitos das NT em vigor, como 1153 da NT
+///   2025.002 e 1275 a 1277 da NT 2026.005, e o 129 da NT 2023.002; K1 da R2), fora os de [`REJEICAO_NAO_CONCLUSIVA`];
+/// - todo o resto (103, 104, 105 e 106 do lote, 108 e 109 do serviço parado, texto que não é código) não é conclusivo:
 ///   desconhecida.
 pub fn estado_da_resposta(origem: Origem, cstat: &str) -> &'static str {
     let c = cstat.trim();
@@ -59,14 +62,61 @@ pub fn estado_da_resposta(origem: Origem, cstat: &str) -> &'static str {
         "217" if origem == Origem::Consulta => return "nao_recebida",
         _ => {}
     }
-    let numero: Option<u32> = if c.len() == 3 && c.bytes().all(|b| b.is_ascii_digit()) { c.parse().ok() } else { None };
-    let rejeicao =
-        numero.is_some_and(|n| n == 142 || (201..=999).contains(&n)) && !REJEICAO_NAO_CONCLUSIVA.contains(&c);
+    let numero: Option<u32> =
+        if matches!(c.len(), 3 | 4) && c.bytes().all(|b| b.is_ascii_digit()) { c.parse().ok() } else { None };
+    let rejeicao = numero.is_some_and(|n| n == 129 || n == 142 || (201..=9999).contains(&n))
+        && !REJEICAO_NAO_CONCLUSIVA.contains(&c);
     if origem == Origem::Envio && rejeicao {
         "rejeitada"
     } else {
         "desconhecida"
     }
+}
+
+/// O código da UF no IBGE (o `cUF` das duas primeiras posições da chave; MOC 7.0, Visão Geral, 8.1).
+pub fn codigo_da_uf(uf: &str) -> Option<&'static str> {
+    Some(match uf.trim().to_uppercase().as_str() {
+        "RO" => "11",
+        "AC" => "12",
+        "AM" => "13",
+        "RR" => "14",
+        "PA" => "15",
+        "AP" => "16",
+        "TO" => "17",
+        "MA" => "21",
+        "PI" => "22",
+        "CE" => "23",
+        "RN" => "24",
+        "PB" => "25",
+        "PE" => "26",
+        "AL" => "27",
+        "SE" => "28",
+        "BA" => "29",
+        "MG" => "31",
+        "ES" => "32",
+        "RJ" => "33",
+        "SP" => "35",
+        "PR" => "41",
+        "SC" => "42",
+        "RS" => "43",
+        "MS" => "50",
+        "MT" => "51",
+        "GO" => "52",
+        "DF" => "53",
+        _ => return None,
+    })
+}
+
+/// K3 da R2: a chave é da loja? A UF (posições 1–2) e o CNPJ do emitente (7–20) têm de ser os da loja. `Err`: a loja
+/// ainda não informou o CNPJ ou a UF (sem eles, não há como saber de quem é a chave).
+fn chave_e_da_loja(conn: &Connection, chave: &str) -> Result<bool, &'static str> {
+    let cnpj = crate::documento::digitos(&crate::config::ler(conn, "loja_cnpj").ok().flatten().unwrap_or_default());
+    let uf = crate::config::ler(conn, "loja_uf").ok().flatten().unwrap_or_default();
+    let (Some(cuf), 14) = (codigo_da_uf(&uf), cnpj.len()) else {
+        return Err("sem o CNPJ e a UF da loja, o Rustinho não confere de quem é a chave");
+    };
+    let c = chave.trim();
+    Ok(c.len() == 44 && &c[..2] == cuf && c[6..20] == cnpj)
 }
 
 /// O dígito verificador da chave de acesso (módulo 11, pesos de 2 a 9 da direita para a esquerda; MOC 7.0, 5.4).
@@ -389,6 +439,17 @@ pub fn registrar_resposta(
         if !chave_e_desta_nota(chave, modelo, serie, numero) {
             return desconhecida(&format!("{cstat} - {}; a chave de acesso não é desta nota", r.motivo.trim()));
         }
+        // K3 da R2: o mesmo modelo, série e número de outro emitente (outra loja, outro CNPJ) não é esta nota.
+        match chave_e_da_loja(tx, chave) {
+            Ok(true) => {}
+            Ok(false) => {
+                return desconhecida(&format!(
+                    "{cstat} - {}; a chave de acesso é de outro emitente (CNPJ ou UF diferente da loja)",
+                    r.motivo.trim()
+                ))
+            }
+            Err(o_que) => return desconhecida(&format!("{cstat} - {}; {o_que}", r.motivo.trim())),
+        }
         if !chave_antes.is_empty() && chave != chave_antes {
             return desconhecida(&format!("{cstat} - {}; resposta de outra nota (outra chave)", r.motivo.trim()));
         }
@@ -531,11 +592,12 @@ pub fn painel(conn: &Connection, f: &Filtros) -> Resultado<Painel> {
             AND (?2 = 0 OR modelo = ?2)
             AND date(criado_em, 'localtime') BETWEEN ?3 AND ?4
             AND estado <> 'descartada'
-            AND (CAST(numero AS TEXT) LIKE ?5 OR destinatario_nome LIKE ?5 OR chave LIKE ?5)
+            AND (CAST(numero AS TEXT) LIKE ?5 OR destinatario_nome LIKE ?5 OR (?6 AND chave LIKE ?5))
           ORDER BY criado_em DESC, numero DESC"
     ))?;
     let notas: Vec<NotaResumo> = c
-        .query_map(params![amb, f.modelo, de, ate, texto], |l| {
+        // K8 da R2: a chave (44 dígitos) só entra na pesquisa com 10 dígitos ou mais; pesquisar "3" achava quase todas.
+        .query_map(params![amb, f.modelo, de, ate, texto, crate::documento::digitos(&f.texto).len() >= 10], |l| {
             Ok(NotaResumo {
                 id: l.get(0)?,
                 modelo: l.get(1)?,
@@ -598,10 +660,10 @@ pub fn explicacao(estado: &str) -> &'static str {
         "rascunho" => "Esta nota ainda não foi transmitida. O número sai na hora de transmitir.",
         "enviada" => "A transmissão começou e a resposta ainda não chegou. Não transmita de novo: consulte na SEFAZ.",
         "autorizada" => "A SEFAZ autorizou esta nota.",
-        "rejeitada" => "A SEFAZ recusou esta nota. Veja o motivo abaixo e corrija. Ela pode ser transmitida de novo, com o mesmo número, ou descartada.",
+        "rejeitada" => "A SEFAZ recusou esta nota. Veja o motivo abaixo e corrija. Depois ela pode ser transmitida de novo, com o mesmo número (quando o emissor estiver ligado), ou descartada.",
         "denegada" => "A SEFAZ denegou esta nota (problema no cadastro do emitente ou do destinatário). O número não pode ser usado de novo.",
         "desconhecida" => "O Rustinho não sabe se a SEFAZ recebeu esta nota: a resposta não veio ou não foi conclusiva. Não transmita de novo: consulte na SEFAZ primeiro.",
-        "nao_recebida" => "A SEFAZ informou que esta nota não chegou lá. Ela pode ser transmitida de novo ou descartada.",
+        "nao_recebida" => "A SEFAZ informou que esta nota não chegou lá. Ela pode ser transmitida de novo (quando o emissor estiver ligado) ou descartada.",
         "cancelada" => "Esta nota foi cancelada.",
         "descartada" => "Esta nota foi descartada antes de chegar à SEFAZ.",
         _ => "",
@@ -948,6 +1010,8 @@ mod testes {
     #[derive(Clone, Copy)]
     enum Chave {
         Desta,
+        OutroCnpj,
+        OutraUf,
         DestaOutroCodigo,
         Vazia,
         DeOutroNumero,
@@ -978,6 +1042,19 @@ mod testes {
             };
             let c = match qual {
                 Chave::Desta => chave(nota.modelo, nota.serie, nota.numero, 1),
+                Chave::OutroCnpj | Chave::OutraUf => {
+                    let mut corpo = format!(
+                        "{}2611{}{:02}{:03}{:09}1{:08}",
+                        if matches!(qual, Chave::OutraUf) { "41" } else { "35" },
+                        if matches!(qual, Chave::OutroCnpj) { "99888777000166" } else { "11222333000181" },
+                        nota.modelo,
+                        nota.serie,
+                        nota.numero,
+                        1
+                    );
+                    corpo.push((b'0' + digito_da_chave(corpo.as_bytes())) as char);
+                    corpo
+                }
                 Chave::DestaOutroCodigo => chave(nota.modelo, nota.serie, nota.numero, 2),
                 Chave::Vazia => String::new(),
                 Chave::DeOutroNumero => chave(nota.modelo, nota.serie, nota.numero + 1, 1),
@@ -1022,7 +1099,14 @@ mod testes {
         let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "senha-da-ana-1", true).unwrap().id;
         crate::usuarios::definir_gerente(&b.conn, &u, true).unwrap();
         crate::fiscal_porta::ligar(&b.conn, &b.dispositivo, &u, true, "senha-da-ana-1").unwrap();
+        loja_de_sp(&b);
         (b, u)
+    }
+
+    /// O CNPJ e a UF da loja de teste (os da chave das respostas falsas).
+    fn loja_de_sp(b: &Banco) {
+        crate::config::gravar(&b.conn, "loja_cnpj", "11.222.333/0001-81").unwrap();
+        crate::config::gravar(&b.conn, "loja_uf", "SP").unwrap();
     }
 
     fn nova(b: &Banco, u: &str) -> String {
@@ -1052,6 +1136,11 @@ mod testes {
             (Envio, "225", "rejeitada"),
             (Envio, "142", "rejeitada"),
             (Envio, "383", "rejeitada"),
+            // K1 da R2: as rejeições de 4 dígitos das NT em vigor e a 129 da NT 2023.002.
+            (Envio, "1153", "rejeitada"),
+            (Envio, "1275", "rejeitada"),
+            (Envio, "1002", "rejeitada"),
+            (Envio, "129", "rejeitada"),
             (Consulta, "100", "autorizada"),
             (Consulta, "110", "denegada"),
             (Consulta, "101", "cancelada"),
@@ -1062,13 +1151,13 @@ mod testes {
             assert_eq!(estado_da_resposta(o, c), e, "{o:?} {c}");
         }
         for c in [
-            "103", "104", "105", "106", "107", "108", "109", "124", "135", "204", "205", "539", "613", "656", "999",
-            "000", "099", "1000", "abc", "", " ",
+            "103", "104", "105", "106", "107", "108", "109", "124", "135", "204", "205", "206", "218", "539", "613",
+            "635", "656", "999", "000", "099", "10000", "12a", "abc", "", " ",
         ] {
             assert_eq!(estado_da_resposta(Envio, c), "desconhecida", "envio {c:?}");
         }
         // Na consulta, o código de rejeição é do pedido de consulta, e não da nota; e o cancelamento só vem da consulta.
-        for c in ["225", "236", "105", "108", "999"] {
+        for c in ["225", "236", "105", "108", "999", "1153", "129"] {
             assert_eq!(estado_da_resposta(Consulta, c), "desconhecida", "consulta {c}");
         }
         for c in ["101", "151", "155", "217"] {
@@ -1145,6 +1234,43 @@ mod testes {
         let _ = &mut b;
     }
 
+    /// K2 da R2: 206 (já inutilizada), 218 (já cancelada) e 635 (o mesmo número já transmitido, aguardando) dizem que o
+    /// número já existe na SEFAZ: não é rejeição que se descarta (o número não pode voltar); fica sem resposta, e só a
+    /// consulta decide.
+    #[test]
+    fn r2_k2_numero_que_ja_existe_na_sefaz_nao_volta() {
+        for cstat in ["206", "218", "635"] {
+            let (mut b, u) = banco();
+            let id = nova(&b, &u);
+            assert_eq!(transmitir(&mut b.conn, &u, &mut Falso::com(vec![ok(cstat)]), &id).unwrap(), "desconhecida");
+            assert!(descartar(&b.conn, &u, &id).is_err(), "{cstat}: não se descarta");
+            let livres = crate::config::ler(&b.conn, &chave_dos_livres(2, 65, 1)).unwrap().unwrap_or_default();
+            assert!(livres.is_empty(), "{cstat}: o número não voltou");
+            let outra = nova(&b, &u);
+            transmitir(&mut b.conn, &u, &mut Falso::com(vec![ok("100")]), &outra).unwrap();
+            assert_eq!(numero(&b, &outra), 2, "{cstat}: a próxima não repete o número");
+        }
+    }
+
+    /// K3 da R2: a resposta com o mesmo modelo, série e número, mas de outro emitente (outro CNPJ ou outra UF), não é
+    /// desta nota; sem o CNPJ e a UF da loja, não há como conferir: fica sem resposta.
+    #[test]
+    fn r2_k3_resposta_de_outro_emitente_nao_vale() {
+        for (qual, o_que) in [(Chave::OutroCnpj, "outro CNPJ"), (Chave::OutraUf, "outra UF")] {
+            let (mut b, u) = banco();
+            let id = nova(&b, &u);
+            let mut falso = Falso::com(vec![None, Some(("100", qual, true))]);
+            transmitir(&mut b.conn, &u, &mut falso, &id).unwrap();
+            assert_eq!(consultar(&mut b.conn, &u, &mut falso, &id).unwrap(), "desconhecida", "{o_que}");
+            assert_eq!(detalhe(&b.conn, &id).unwrap().chave, "", "{o_que}");
+        }
+        let (mut b, u) = banco();
+        crate::config::gravar(&b.conn, "loja_cnpj", "").unwrap();
+        let id = nova(&b, &u);
+        assert_eq!(transmitir(&mut b.conn, &u, &mut Falso::com(vec![ok("100")]), &id).unwrap(), "desconhecida");
+        assert!(detalhe(&b.conn, &id).unwrap().eventos.iter().any(|e| e.detalhe.contains("sem o CNPJ e a UF da loja")));
+    }
+
     /// FIS-P2: sem resposta não é rejeição, e não se reenvia; só a consulta resolve. A consulta que diz "não consta"
     /// (217) libera o reenvio.
     #[test]
@@ -1196,6 +1322,7 @@ mod testes {
         let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "senha-da-ana-1", true).unwrap().id;
         crate::usuarios::definir_gerente(&b.conn, &u, true).unwrap();
         crate::fiscal_porta::ligar(&b.conn, &b.dispositivo, &u, true, "senha-da-ana-1").unwrap();
+        loja_de_sp(&b);
         let id = nova(&b, &u);
         let mut espiao = Espiao { visto: None, caminho: caminho.clone() };
         assert_eq!(transmitir(&mut b.conn, &u, &mut espiao, &id).unwrap(), "desconhecida");
@@ -1445,9 +1572,10 @@ mod testes {
         assert_eq!((so.notas.len(), so.notas[0].estado.as_str()), (1, "desconhecida"));
         let canc = painel(&b.conn, &Filtros { indicador: "canceladas".into(), ..Default::default() }).unwrap();
         assert_eq!(canc.notas.len(), 1);
-        // O número acha a nota (e a chave de 44 dígitos, que também se pesquisa, pode trazer outras junto).
+        // K8 da R2: o número acha só a nota dele (a chave entra na pesquisa só com 10 dígitos ou mais).
         let numero3 = painel(&b.conn, &Filtros { texto: "3".into(), ..Default::default() }).unwrap();
-        assert!(numero3.notas.iter().any(|n| n.numero == 3 && n.estado == "desconhecida"), "{:?}", numero3.notas);
+        assert_eq!(numero3.notas.len(), 1, "{:?}", numero3.notas);
+        assert_eq!((numero3.notas[0].numero, numero3.notas[0].estado.as_str()), (3, "desconhecida"));
         let pela_chave = painel(&b.conn, &Filtros { texto: chave(65, 1, 1, 1), ..Default::default() }).unwrap();
         assert_eq!((pela_chave.notas.len(), pela_chave.notas[0].estado.as_str()), (1, "autorizada"));
         assert_eq!(painel(&b.conn, &Filtros { texto: "Bia".into(), ..Default::default() }).unwrap().notas.len(), 1);
