@@ -193,22 +193,6 @@ def main():
            f"validar.yml: o passo do manifesto tem RUSTINHO_SHARDS_TELAS={env_m.get('RUSTINHO_SHARDS_TELAS')!r}, "
            f"diferente dos {esperado_env} shard(s) esperados de programa-e-telas")
 
-    # 8. T031 (26/11/2026): todo envio de artefato substitui o de mesmo nome. Ao repetir só os jobs que falharam, sem
-    #    isso a execução fica com dois artefatos iguais no nome (ex.: o Manifesto reprovado da 1ª tentativa e o
-    #    aprovado da 2ª) e o Portão pode ler o antigo.
-    acao_ambiente = os.path.join(PASTA, "..", "acoes", "ambiente", "action.yml")
-    arquivos = sorted(glob.glob(os.path.join(PASTA, "*.yml"))) + ([acao_ambiente] if os.path.exists(acao_ambiente) else [])
-    for caminho in arquivos:
-        with open(caminho, encoding="utf-8") as f:
-            w = yaml.safe_load(f) or {}
-        passos_todos = [p for j in (w.get("jobs") or {}).values() for p in (j.get("steps") or [])]
-        passos_todos += list(((w.get("runs") or {}).get("steps")) or [])
-        for p in passos_todos:
-            if str(p.get("uses", "")).startswith("actions/upload-artifact@"):
-                nome = (p.get("with") or {}).get("name")
-                exigir((p.get("with") or {}).get("overwrite") is True,
-                       f"{os.path.basename(caminho)}: o envio do artefato {nome!r} tem de ter overwrite: true (T031)")
-
     if erros:
         for e in erros:
             print(f"::error title=Forma do portão::{e}")

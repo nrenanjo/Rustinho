@@ -162,7 +162,6 @@ jobs:
         if: always()
         with:
           name: verificacao-windows
-          overwrite: true
           path: verificacao/
           retention-days: 30
 
@@ -224,6 +223,5 @@ jobs:
         if: always()
         with:
           name: verificacao-linux
-          overwrite: true
           path: verificacao/
           retention-days: 30

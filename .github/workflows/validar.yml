@@ -162,7 +162,6 @@ jobs:
         if: always()
         with:
           name: Testes-Linux-${{ matrix.perfil }}
-          overwrite: true
           path: testes/
           retention-days: 90
 
@@ -229,7 +228,6 @@ jobs:
         if: always()
         with:
           name: Testes-Windows-${{ matrix.parte }}
-          overwrite: true
           path: testes/
           retention-days: 90
 
@@ -340,7 +338,6 @@ jobs:
         if: always()
         with:
           name: Telas-Linux-shard-${{ matrix.shard }}
-          overwrite: true
           path: |
             saida_telas/telas.txt
             saida_telas/telas-resultado.txt
@@ -480,7 +477,6 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Rustinho-Linux
-          overwrite: true
           path: |
             saida/*.AppImage
             saida/*.sha256
@@ -660,7 +656,6 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Rustinho-Windows
-          overwrite: true
           path: |
             saida/*-Windows-instalador.exe
             saida/*-Windows-instalador.exe.sha256
@@ -670,7 +665,6 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Rustinho-Windows-portatil
-          overwrite: true
           path: |
             saida/*.zip
             saida/*.zip.sha256
@@ -846,7 +840,6 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Rustinho-Android${{ matrix.sufixo }}
-          overwrite: true
           path: saida/
           retention-days: 90
 
@@ -933,7 +926,6 @@ jobs:
         if: always()
         with:
           name: Emulador-${{ matrix.nome }}
-          overwrite: true
           path: fotos/
           retention-days: 90
 
@@ -966,7 +958,6 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Manifesto
-          overwrite: true
           path: manifesto/
           retention-days: 90
       - name: Reprovar se algum job não passou
