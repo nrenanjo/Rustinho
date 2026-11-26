@@ -6,3 +6,4 @@ pub mod codigo;
 pub mod fiscal_porta;
 pub mod impressao;
 pub mod nfe_assinatura;
+pub mod nota_fiscal;

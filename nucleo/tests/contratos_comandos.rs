@@ -164,6 +164,9 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("menu_usar", "caixa", &["do_caixa"]),
     ("movimento_estornar", "estornar", &["nao_repetir"]),
     ("movimento_lancar", "financeiro", &["nao_repetir"]),
+    // Pacote E da etapa 3 (26/11/2026): o painel e o detalhe das notas emitidas pelo Rustinho (só leem).
+    ("nota_detalhe", "leitura", &["leitura"]),
+    ("nota_painel", "leitura", &["leitura"]),
     ("numero_formatar", "leitura", &["leitura", "sem_sessao"]),
     // dev.3.3, passo 2.2 (H13, ARQ-09): somas pelo núcleo; sem sessão, como o numero_formatar.
     ("numero_somar", "leitura", &["leitura", "sem_sessao"]),

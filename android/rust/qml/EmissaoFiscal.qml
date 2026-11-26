@@ -32,17 +32,6 @@ ColumnLayout {
     ]
     spacing: 12
 
-    // Ícone grande num círculo (os blocos vazios).
-    component Selo: Rectangle {
-        property string icone: ""
-        implicitWidth: 92
-        implicitHeight: 92
-        radius: 46
-        color: Tema.sombra(0.07)
-        Layout.alignment: Qt.AlignHCenter
-        Icone { anchors.centerIn: parent; nome: parent.icone; tamanho: 62; espessura: 1.6; cor: Tema.tinta }
-    }
-
     Faixa {
         titulo: "Emissão fiscal"
         color: Tema.verde
@@ -150,27 +139,7 @@ ColumnLayout {
         }
     }
 
-    Faixa {
-        titulo: "Contingência e pendências"
-        color: Tema.pergaminho
-        Layout.fillWidth: true
-        espacamento: 8
-        Selo { icone: "documentoRelogio"; Layout.topMargin: -14 }
-        Text {
-            text: "Nenhuma pendência fiscal"
-            color: Tema.tinta
-            font.family: Tema.titulo
-            font.weight: Font.DemiBold
-            font.pixelSize: Tema.estreito ? 21 : 25
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-        }
-        Nota {
-            text: "Documentos em contingência e transmissões pendentes aparecerão aqui."
-            horizontalAlignment: Text.AlignHCenter
-            Layout.fillWidth: true
-        }
-    }
+    // As pendências (sem resposta, contingência) ficam no painel das notas,
+    // logo abaixo (FIS-P1): um lugar só, sem dois cartões dizendo coisas diferentes.
 
 }

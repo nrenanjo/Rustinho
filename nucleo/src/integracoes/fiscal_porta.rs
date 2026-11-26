@@ -124,11 +124,43 @@ pub struct Licenca {
     _so_a_porta_cria: (),
 }
 
+/// O que o adaptador recebe para transmitir ou consultar uma nota (pacote E).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NotaParaEnviar {
+    pub id: String,
+    /// 1 = produção, 2 = homologação.
+    pub ambiente: i64,
+    /// 55 = NF-e, 65 = NFC-e.
+    pub modelo: i64,
+    pub serie: i64,
+    pub numero: i64,
+    /// A chave de acesso, quando já se sabe (vazia antes da primeira resposta).
+    pub chave: String,
+    pub valor: i64,
+    pub destinatario_doc: String,
+    pub destinatario_nome: String,
+}
+
+/// Uma resposta conclusiva da SEFAZ, pelo adaptador: o cStat e o motivo na íntegra.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RespostaSefaz {
+    pub chave: String,
+    pub cstat: String,
+    pub motivo: String,
+    pub protocolo: String,
+    pub xml_nome: String,
+}
+
 /// O adaptador fiscal (o ACBrMonitorPLUS por TCP/IP local, DF-3, ou o falso dos testes). Todo método recebe a
-/// licença: sem passar pela porta, não há como chamar. Os métodos da emissão entram no pacote E do `roadmap.md`.
+/// licença: sem passar pela porta, não há como chamar. Um erro (`Err`) quer dizer **sem resposta conclusiva** (a
+/// conexão caiu, o tempo acabou): a nota fica como "desconhecida", e o certo é consultar antes de reenviar.
 pub trait Adaptador {
     /// O estado do serviço (a primeira pergunta de qualquer conversa com o adaptador).
     fn status(&mut self, licenca: &Licenca) -> Resultado<String>;
+    /// Transmite a nota e devolve a resposta da SEFAZ.
+    fn enviar(&mut self, licenca: &Licenca, nota: &NotaParaEnviar) -> Resultado<RespostaSefaz>;
+    /// Consulta a situação da nota na SEFAZ (pela chave, ou pelo número quando a chave não chegou).
+    fn consultar(&mut self, licenca: &Licenca, nota: &NotaParaEnviar) -> Resultado<RespostaSefaz>;
 }
 
 /// A única forma de falar com o adaptador e com o certificado. Desligado, recusa sem chamar nada.
@@ -197,6 +229,14 @@ mod testes {
         fn status(&mut self, _licenca: &Licenca) -> Resultado<String> {
             self.chamadas += 1;
             Ok("OK: 107 - Serviço em Operação".into())
+        }
+        fn enviar(&mut self, _licenca: &Licenca, _nota: &NotaParaEnviar) -> Resultado<RespostaSefaz> {
+            self.chamadas += 1;
+            Ok(RespostaSefaz::default())
+        }
+        fn consultar(&mut self, _licenca: &Licenca, _nota: &NotaParaEnviar) -> Resultado<RespostaSefaz> {
+            self.chamadas += 1;
+            Ok(RespostaSefaz::default())
         }
     }
 

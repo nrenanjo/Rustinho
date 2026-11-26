@@ -16,8 +16,8 @@ use crate::erro::{Erro, Resultado};
 use crate::{
     arquivos, auditoria, avisos, backup, busca, caixa, cheques, codigo, comissoes, compras, config, consulta,
     devolucoes, documento, dre, encomendas, etiquetas, faixas, financeiro, fiscal, fiscal_porta, importar, impressao,
-    menu, numeros, oficina, pagar, painel, pessoas, produtos, receber, reposicao, requisitos, sync, texto, unidades,
-    usuarios, vendas,
+    menu, nota_fiscal, numeros, oficina, pagar, painel, pessoas, produtos, receber, reposicao, requisitos, sync, texto,
+    unidades, usuarios, vendas,
 };
 
 /// Versão do Rustinho. Mora na base (`rustinho_base::VERSAO`) para quem grava
@@ -501,6 +501,7 @@ const TABELAS: &[&[Comando]] = &[
     financeiro::COMANDOS,
     fiscal::COMANDOS,
     fiscal_porta::COMANDOS,
+    nota_fiscal::COMANDOS,
     importar::COMANDOS,
     menu::COMANDOS,
     oficina::COMANDOS,

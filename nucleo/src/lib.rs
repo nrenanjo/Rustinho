@@ -64,7 +64,7 @@ pub use cadastros::{pessoas, usuarios};
 pub use catalogo::{busca, estoque, etiquetas, faixas, fiscal, produtos, unidades};
 pub use compras::{importar, nfe_xml, reposicao};
 pub use dados::{auditoria, banco, computador, config, migracao, operacoes, portatil, registro, tempo};
-pub use integracoes::{arquivos, backup, codigo, fiscal_porta, impressao, nfe_assinatura};
+pub use integracoes::{arquivos, backup, codigo, fiscal_porta, impressao, nfe_assinatura, nota_fiscal};
 pub use operacao::{
     caixa, cheques, comissoes, devolucoes, dre, encomendas, financeiro, oficina, pagar, painel, receber, vendas,
 };

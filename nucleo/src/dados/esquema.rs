@@ -118,6 +118,10 @@ pub const TABELAS: &[Tabela] = &[
     t("caixa_retirado", Local, &["protocolo4"]),
     t("entrada_falha", Local, &["usuarios"]),
     t("menu_uso", Local, &["menu"]),
+    // 0.9.19, etapa 3 (pacote E): as notas fiscais emitidas por este computador (a estação fiscal, DF-4) e o
+    // histórico delas; não viajam (a numeração e o certificado são deste computador).
+    t("nota_fiscal", Local, &["nota_fiscal"]),
+    t("nota_fiscal_evento", Local, &["nota_fiscal"]),
     // R0 (QT-1): a operação já feita, gravada na transação da própria operação; não viaja.
     // QT-1b: o aviso de fechamento inesperado (não viajam).
     t("fechamento_visto", Local, &["operacoes"]),

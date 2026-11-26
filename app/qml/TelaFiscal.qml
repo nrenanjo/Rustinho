@@ -66,6 +66,8 @@ FocusScope {
 
     function carregar() {
         carregarLiga()
+        if (notas)
+            notas.carregar()
         const c = Api.chamar("config_ler")
         if (c.ok)
             ufs = c.dados.ufs
@@ -352,6 +354,12 @@ FocusScope {
                 liga: tela.liga
                 dadosDaLoja: tela.dadosDaLoja
                 dados: tela.dados
+                Layout.fillWidth: true
+            }
+
+            // FIS-P1 e FIS-P2: as notas emitidas pelo Rustinho neste computador.
+            SecaoNotasFiscais {
+                id: notas
                 Layout.fillWidth: true
             }
 
