@@ -96,6 +96,7 @@ jobs:
           python3 .github/scripts/conferir_portao.py
           python3 .github/scripts/versao_android.py --testar
           python3 .github/scripts/testar_portao.py
+          python3 app/testes/listas_alternadas.py
 
   # L1/L2: testes do núcleo no Linux, debug e release em paralelo (T112); os de rede em série.
   nucleo-linux:

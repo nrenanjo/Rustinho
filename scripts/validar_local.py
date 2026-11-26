@@ -227,6 +227,8 @@ def main():
                 ("L0:conferir-portao", [sys.executable, "-I", ".github/scripts/conferir_portao.py"], os.path.join(logs, "l0_conferir_portao.txt")),
                 ("L0:versao-android", [sys.executable, "-I", ".github/scripts/versao_android.py", "--testar"], os.path.join(logs, "l0_versao_android.txt")),
                 ("L0:testar-portao", [sys.executable, "-I", ".github/scripts/testar_portao.py"], os.path.join(logs, "l0_testar_portao.txt")),
+                # T014 (26/11/2026): toda lista com delegate precisa estar classificada (xadrez das listas).
+                ("L0:listas-alternadas", [sys.executable, "-I", "app/testes/listas_alternadas.py"], os.path.join(logs, "l0_listas_alternadas.txt")),
                 ("L0:cargo-clippy", [
                     "cargo", "clippy", "-p", "rustinho-base", "-p", "rustinho-nucleo",
                     "--all-targets", "--message-format=short", "--",

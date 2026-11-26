@@ -117,7 +117,12 @@ CLASSES = {
     ("TelaCompras.qml", "tela.itens"): ("LISTA", "compras (LinhaCompra)"),
     ("TelaConfiguracoes.qml", ""): ("FORA", D_V5 + " (tabelas de preço)"),
     ("TelaConfiguracoes.qml", "tela.sync ? tela.sync.pares"): ("LISTA", "caixas da rede"),
-    ("TelaConfiguracoes.qml", "tela.sync && tela.sync.referencias"): ("LISTA", "registros incompletos"),
+    ("TelaConfiguracoes.qml", "{ const todas = tela.sync && tela.sync.referencias"): ("LISTA", "registros incompletos"),
+    # T014 (26/11/2026): listas da dev.3.3 e da 0.9.19 que ficaram sem classificação (o verificador estava fora da bateria).
+    ("TelaConfiguracoes.qml", "tela.convitesVistos ? tela.convitesAtivos"): ("LISTA", "convites ativos do protocolo 4"),
+    ("TelaConfiguracoes.qml", "linhaCaixa.modelData.identidades"): ("FORA", ESCOLHA + " (identidades de um caixa)"),
+    ("TelaConfiguracoes.qml", "faixaDaLista5.modelData.juncao ? faixaDaLista5.modelData.juncao.opcoes"): ("FORA", ESCOLHA + " (qual peça fica na junção, R13)"),
+    ("TelaConfiguracoes.qml", "tela.codigos ? tela.codigos.juntadas"): ("LISTA", "peças juntadas (R13)"),
     ("TelaConfiguracoes.qml", "tela.caixasConhecidos"): ("LISTA", "caixas conhecidos"),
     ("TelaConfiguracoes.qml", "tela.verSimultaneidade ? tela.pendencias"): ("LISTA", "pendências da troca de dados"),
     ("TelaConfiguracoes.qml", "tela.gerente ? tela.gerente.usuarios"): ("FORA", ESCOLHA + " (caixas de marcar)"),
@@ -133,7 +138,7 @@ CLASSES = {
     ("TelaConfiguracoes.qml", "grupoPessoas.modelData.pessoas"): ("FORA", "pessoas de um grupo (o grupo alterna)"),
     ("TelaConfiguracoes.qml", "tela.historicoTroca ? tela.historicoTroca.caixas"): ("LISTA", "histórico da troca por caixa"),
     ("TelaConfiguracoes.qml", "tela.historicoTroca ? tela.historicoTroca.encerradas"): ("LISTA", "pendências encerradas"),
-    ("TelaConfiguracoes.qml", "{ const f = filtroAuditoria"): ("LISTA", "auditoria: quem fez o quê"),
+    ("TelaConfiguracoes.qml", "{ const g = tela.filtroRegistro"): ("LISTA", "auditoria: quem fez o quê"),
     ("TelaDevolucao.qml", "tela.venda ? tela.venda.itens"): ("LISTA", "itens da venda"),
     ("TelaDevolucao.qml", "tela.calc && tela.calc.partes"): ("FORA", PREVIA),
     ("TelaDevolucao.qml", "tela.motivos"): ("FORA", ESCOLHA),
@@ -148,6 +153,9 @@ CLASSES = {
     ("TelaInicio.qml", "tela.faixas"): ("FORA", "notificações"),
     ("TelaInicio.qml", "tela.quadrados"): ("FORA", "notificações"),
     ("TelaInicio.qml", "tela.menu.todos"): ("FORA", "cartões da Início: xadrez próprio (V-7)"),
+    ("TelaInicio.qml", "tela.trabalhos && tela.trabalhos.meus"): ("LISTA", "trabalhos guardados deste usuário"),
+    ("TelaInicio.qml", "tela.trabalhos && tela.trabalhos.deOutroCaixa"): ("FORA", AVISOS + " (trabalhos de outro caixa, só o aviso)"),
+    ("TelaInicio.qml", "tela.trabalhos && tela.trabalhos.deUsuariosDesativados"): ("LISTA", "trabalhos de usuários desativados"),
     ("TelaJuntar.qml", "tela.sync ? tela.sync.pares"): ("LISTA", "caixas achados na rede"),
     ("TelaOrcamentos.qml", "tela.itens"): ("LISTA", "orçamentos (LinhaVenda)"),
     ("TelaOrdem.qml", "tela.achados"): ("FORA", MENU),
@@ -162,7 +170,7 @@ CLASSES = {
     ("TelaPeca.qml", "tela.ficha && tela.ficha.fornecedores"): ("LISTA", "códigos nos fornecedores"),
     ("TelaPeca.qml", "tela.ficha ? tela.ficha.historico"): ("LISTA", "histórico da peça"),
     ("TelaPeca.qml", "modelData.detalhes"): ("FORA", "detalhes de um item do histórico (a linha alterna)"),
-    ("TelaPecas.qml", "tela.itens"): ("LISTA", "peças (LinhaPeca)"),
+    ("TelaPecas.qml", "pecas"): ("LISTA", "peças (LinhaPeca)"),
     ("TelaPessoa.qml", "veiculos"): ("FORA", D_V5 + " (LinhaVeiculo)"),
     ("TelaPessoa.qml", "tela.ficha ? tela.ficha.historico"): ("LISTA", "histórico da pessoa"),
     ("TelaPessoa.qml", "modelData.detalhes"): ("FORA", "detalhes de um item do histórico (a linha alterna)"),
@@ -221,7 +229,8 @@ def delegados():
             if not m:
                 continue
             modelo = ""
-            for j in range(i - 1, max(-1, i - 16), -1):
+            # T014: 45 linhas (a prévia da importação de cadastros tem o model 40 linhas acima do delegate).
+            for j in range(i - 1, max(-1, i - 45), -1):
                 mm = re.search(r"\bmodel:\s*(.*)", linhas[j])
                 if mm:
                     modelo = mm.group(1).strip()
