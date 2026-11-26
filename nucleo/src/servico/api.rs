@@ -15,9 +15,9 @@ use crate::despacho::{ler, Acesso, Classe, Comando, Estorno, Id, Pedido};
 use crate::erro::{Erro, Resultado};
 use crate::{
     arquivos, auditoria, avisos, backup, busca, caixa, cheques, codigo, comissoes, compras, config, consulta,
-    devolucoes, documento, dre, encomendas, etiquetas, faixas, financeiro, fiscal, fiscal_porta, importar, impressao,
-    menu, nota_fiscal, numeros, oficina, pagar, painel, pessoas, produtos, receber, reposicao, requisitos, sync, texto,
-    unidades, usuarios, vendas,
+    devolucoes, documento, dre, encomendas, etiquetas, faixas, financeiro, fiscal, fiscal_descoberta, fiscal_porta,
+    importar, impressao, menu, nota_fiscal, numeros, oficina, pagar, painel, pessoas, produtos, receber, reposicao,
+    requisitos, sync, texto, unidades, usuarios, vendas,
 };
 
 /// Versão do Rustinho. Mora na base (`rustinho_base::VERSAO`) para quem grava
@@ -259,6 +259,7 @@ const GRAVAM_TAMBEM: &[&str] = &[
     "encomenda_whatsapp",
     "estoque_dias",
     "fiscal_ambiente_trocar",
+    "fiscal_descoberta_usar",
     "fiscal_automatico",
     "fiscal_desligar",
     "fiscal_ligar",
@@ -501,6 +502,7 @@ const TABELAS: &[&[Comando]] = &[
     etiquetas::COMANDOS,
     financeiro::COMANDOS,
     fiscal::COMANDOS,
+    fiscal_descoberta::COMANDOS,
     fiscal_porta::COMANDOS,
     nota_fiscal::COMANDOS,
     importar::COMANDOS,

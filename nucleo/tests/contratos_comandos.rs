@@ -141,6 +141,9 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("fiscal_ambiente_trocar", "caixa", &["do_caixa"]),
     ("fiscal_automatico", "caixa", &["do_caixa"]),
     ("fiscal_conferir", "leitura", &["leitura"]),
+    // T010b (etapa 3, 26/11/2026): a descoberta nas notas da loja (consulta do gerente) e o "Usar este".
+    ("fiscal_descoberta_usar", "configuracoes", &[]),
+    ("fiscal_descobrir", "configuracoes", &["leitura"]),
     // FIS-LIGA (etapa 3, 26/11/2026): a função confere o gerente; ligar pede a senha de um gerente na hora.
     ("fiscal_desligar", "caixa", &["do_caixa"]),
     ("fiscal_liga_estado", "leitura", &["leitura"]),

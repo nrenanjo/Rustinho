@@ -179,6 +179,116 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
     d
 }
 
+/// O que a tela pode gravar com o "Usar este" (chaves só deste computador). O CNPJ, a UF e a IE não: eles ficam em
+/// Configurações › Loja (a tela só confere e aponta para lá).
+pub fn chave_de(campo: &str) -> Option<&'static str> {
+    match campo {
+        "serieNfce" => Some("fiscal_serie_nfce"),
+        "serieNfe" => Some("fiscal_serie_nfe"),
+        "crt" => Some("fiscal_crt"),
+        "identificadorCsc" => Some("fiscal_csc_id"),
+        _ => None,
+    }
+}
+
+/// Grava um dado confirmado na tela, com registro.
+pub fn usar(
+    tx: &rusqlite::Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    campo: &str,
+    valor: &str,
+) -> crate::erro::Resultado<()> {
+    let chave = chave_de(campo).ok_or_else(|| crate::erro::Erro::validacao("Este dado não se grava por aqui."))?;
+    let valor: String = valor.trim().chars().take(20).collect();
+    let valido = match campo {
+        "serieNfce" | "serieNfe" => valor.parse::<i64>().is_ok_and(|n| (0..=999).contains(&n)),
+        "crt" => matches!(valor.as_str(), "1" | "2" | "3" | "4"),
+        _ => !valor.is_empty() && valor.chars().all(|c| c.is_ascii_digit()),
+    };
+    if !valido {
+        return Err(crate::erro::Erro::validacao("Valor inválido para este dado."));
+    }
+    crate::config::gravar(tx, chave, &valor)?;
+    crate::auditoria::registrar(
+        tx,
+        dispositivo,
+        Some(usuario_id),
+        "fiscal.descoberta",
+        "config",
+        chave,
+        &[format!("Dado fiscal confirmado a partir das notas da loja: {campo} = {valor}")],
+    )
+}
+
+pub use comandos::COMANDOS;
+
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando {
+            nome: "fiscal_descobrir",
+            classe: Classe::ConsultaDoGerente("configuracoes"),
+            funcao: fiscal_descobrir,
+        },
+        Comando {
+            nome: "fiscal_descoberta_usar",
+            classe: Classe::Gerente("configuracoes"),
+            funcao: fiscal_descoberta_usar,
+        },
+    ];
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Pasta {
+        entradas: Vec<String>,
+    }
+
+    fn fiscal_descobrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Pasta = ler(dados)?;
+        let achados = crate::arquivos::xmls(&d.entradas)?;
+        let mut arquivos = Vec::new();
+        let mut sem_leitura = Vec::new();
+        for x in achados {
+            if x.texto.is_empty() {
+                sem_leitura.push(format!("{}: {}", x.nome, x.erro));
+            } else {
+                arquivos.push((x.nome, x.texto));
+            }
+        }
+        let cnpj = crate::config::ler(p.conn, "loja_cnpj")?.unwrap_or_default();
+        let mut descoberta = super::descobrir_de_xml(&arquivos, &cnpj);
+        descoberta.ignorados.extend(sem_leitura);
+        Ok(json!({
+            "descoberta": descoberta,
+            "loja": {
+                "cnpj": cnpj,
+                "uf": crate::config::ler(p.conn, "loja_uf")?.unwrap_or_default(),
+            },
+        }))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Usar {
+        campo: String,
+        valor: String,
+    }
+
+    fn fiscal_descoberta_usar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Usar = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        super::usar(&tx, p.disp, p.usuario_id, &d.campo, &d.valor)?;
+        tx.commit()?;
+        Ok(json!({ "ok": true }))
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -231,6 +341,28 @@ mod testes {
         assert_eq!(d.series, vec![Serie { ambiente: 1, modelo: 65, serie: 2, ultimo_numero: 45, notas: 1 }]);
         assert!(d.ignorados.iter().any(|i| i.contains("não está autorizada")));
         assert!(d.ignorados.iter().any(|i| i.contains("outro emitente")));
+    }
+
+    /// T010b: só os dados de "Usar este" se gravam (chaves deste computador), com valor válido e registro; o CNPJ,
+    /// a UF e a IE não se gravam por aqui.
+    #[test]
+    fn t010b_usar_grava_so_o_permitido() {
+        let b = crate::banco::Banco::em_memoria().unwrap();
+        let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "senha-da-ana-1", true).unwrap().id;
+        usar(&b.conn, &b.dispositivo, &u, "serieNfce", "1").unwrap();
+        usar(&b.conn, &b.dispositivo, &u, "crt", "1").unwrap();
+        assert_eq!(crate::config::ler(&b.conn, "fiscal_serie_nfce").unwrap().as_deref(), Some("1"));
+        assert_eq!(crate::config::ler(&b.conn, "fiscal_crt").unwrap().as_deref(), Some("1"));
+        assert!(usar(&b.conn, &b.dispositivo, &u, "cnpj", "11222333000181").is_err());
+        assert!(usar(&b.conn, &b.dispositivo, &u, "serieNfe", "1000").is_err());
+        assert!(usar(&b.conn, &b.dispositivo, &u, "crt", "9").is_err());
+        assert!(usar(&b.conn, &b.dispositivo, &u, "identificadorCsc", "abc").is_err());
+        let registros: i64 = b
+            .conn
+            .query_row("SELECT COUNT(*) FROM auditoria WHERE acao = 'fiscal.descoberta'", [], |l| l.get(0))
+            .unwrap();
+        assert_eq!(registros, 2);
+        assert!(!crate::sync::chave_da_loja("fiscal_serie_nfce"), "a série fica só neste computador");
     }
 
     #[test]

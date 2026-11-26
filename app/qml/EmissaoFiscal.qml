@@ -1,5 +1,7 @@
+import QtCore
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import rustinho
 
@@ -18,6 +20,38 @@ ColumnLayout {
     readonly property bool ligado: !!liga && liga.ligado
     readonly property int semNcm: dados ? dados.semNcm.length : 0
     readonly property bool lojaPronta: !!dadosDaLoja && dadosDaLoja.satisfeito
+    // T010b: o que foi achado nas notas da loja (null = ainda não procurou).
+    property var achado: null
+
+    function descobrir(pasta) {
+        const r = Api.chamar("fiscal_descobrir", { entradas: [Api.caminho(pasta.toString())] })
+        if (!r.ok) {
+            emissao.janela.avisar(r.erro, "erro")
+            return
+        }
+        achado = r.dados
+        painelDescoberta.open()
+    }
+
+    function usar(campo, valor, nome) {
+        emissao.janela.chamarGerente("fiscal_descoberta_usar", { campo: campo, valor: String(valor) }, r => {
+            if (r.ok)
+                emissao.janela.avisar(nome + " confirmado.", "ok")
+            else
+                emissao.janela.avisar(r.erro, "erro")
+        })
+    }
+
+    function nomeDoCrt(c) {
+        return ({ "1": "1 · Simples Nacional", "2": "2 · Simples Nacional, excesso de sublimite", "3": "3 · Regime Normal",
+                  "4": "4 · MEI" })[c] || c
+    }
+
+    function confere(achadoValor, daLoja) {
+        if (!daLoja)
+            return "a loja ainda não informou"
+        return achadoValor === daLoja ? "confere com o da loja" : "diferente do informado em Loja: confira lá"
+    }
     readonly property var passos: [
         { titulo: "1. Emissor fiscal", situacao: "ainda não disponível", pronto: false,
           explicacao: "A ligação com o emissor (o ACBrMonitorPLUS deste computador) ainda não está pronta nesta versão." },
@@ -138,9 +172,123 @@ ColumnLayout {
                 }
             }
         }
+        Botao {
+            text: "Trazer os dados das notas que a loja já emitiu"
+            icone: "documento"
+            tipo: "secundario"
+            onClicked: seletorDescoberta.open()
+
+        }
     }
 
     // As pendências (sem resposta, contingência) ficam no painel das notas,
     // logo abaixo (FIS-P1): um lugar só, sem dois cartões dizendo coisas diferentes.
 
+
+    // T010b: a pasta com os XML que o sistema de hoje guarda (o seletor nativo, diretriz do dono).
+    FolderDialog {
+        id: seletorDescoberta
+        title: "Escolha a pasta com os XML das notas que a loja já emitiu"
+        currentFolder: StandardPaths.standardLocations(StandardPaths.DocumentsLocation)[0]
+        onAccepted: emissao.descobrir(selectedFolder)
+    }
+
+    // T010b: o que foi achado, item por item; nada se grava sem o "Usar este".
+    Painel {
+        id: painelDescoberta
+        width: Math.min(680, Tema.largura - 24)
+        readonly property var d: emissao.achado ? emissao.achado.descoberta : null
+        readonly property var loja: emissao.achado ? emissao.achado.loja : null
+        contentItem: Flickable {
+            implicitHeight: Math.min(colunaDescoberta.implicitHeight, painelDescoberta.alturaMaxima - 40)
+            contentHeight: colunaDescoberta.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ColumnLayout {
+                id: colunaDescoberta
+                width: parent.width
+                spacing: 12
+                Titulo { text: "O que achei nas notas da loja"; font.pixelSize: 26; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                Nota {
+                    text: !painelDescoberta.d ? "" : (painelDescoberta.d.lidas === 1 ? "1 nota autorizada lida" : painelDescoberta.d.lidas + " notas autorizadas lidas")
+                          + (painelDescoberta.d.ignorados.length ? " · " + painelDescoberta.d.ignorados.length + " arquivos deixados de lado (não autorizados, de outro emitente ou sem leitura)" : "")
+                          + ". Nada é gravado sem você confirmar."
+                    font.pixelSize: 14
+                    Layout.fillWidth: true
+                }
+                Nota {
+                    visible: !!painelDescoberta.d && painelDescoberta.d.lidas === 0
+                    text: "Não achei nota autorizada da loja nesta pasta."
+                    Layout.fillWidth: true
+                }
+                Repeater {
+                    model: !painelDescoberta.d ? [] : [
+                        { campo: "", nome: "CNPJ", a: painelDescoberta.d.cnpj, nota: painelDescoberta.d.cnpj ? emissao.confere(painelDescoberta.d.cnpj.valor, painelDescoberta.loja.cnpj.replace(/\D/g, "")) : "" },
+                        { campo: "", nome: "UF", a: painelDescoberta.d.uf, nota: painelDescoberta.d.uf ? emissao.confere(painelDescoberta.d.uf.valor, painelDescoberta.loja.uf) : "" },
+                        { campo: "", nome: "Inscrição estadual", a: painelDescoberta.d.ie, nota: "" },
+                        { campo: "crt", nome: "Regime (CRT)", a: painelDescoberta.d.crt, nota: "confirme com o contador" },
+                        { campo: "identificadorCsc", nome: "Identificador do CSC", a: painelDescoberta.d.identificadorCsc,
+                          nota: "o CSC (o código secreto) não aparece nas notas: ele fica com o contador ou no portal da SEFAZ" }
+                    ].filter(x => !!x.a)
+                    delegate: ColumnLayout {
+                        id: itemAchado
+                        required property var modelData
+                        spacing: 4
+                        Layout.fillWidth: true
+                        Text {
+                            text: itemAchado.modelData.nome + ": " + (itemAchado.modelData.campo === "crt" ? emissao.nomeDoCrt(itemAchado.modelData.a.valor) : itemAchado.modelData.a.valor)
+                                  + (itemAchado.modelData.a.outros.length ? " (em notas antigas: " + itemAchado.modelData.a.outros.join(", ") + ")" : "")
+                            textFormat: Text.PlainText
+                            color: Tema.tinta
+                            font.family: Tema.texto
+                            font.weight: Font.DemiBold
+                            font.pixelSize: 15
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Nota {
+                            text: "Da nota " + itemAchado.modelData.a.chaveDaNota.slice(-12) + (itemAchado.modelData.nota ? " · " + itemAchado.modelData.nota : "")
+                            font.pixelSize: 13
+                            Layout.fillWidth: true
+                        }
+                        Botao {
+                            visible: itemAchado.modelData.campo !== ""
+                            text: "Usar este"
+                            tipo: "discreto"
+                            onClicked: emissao.usar(itemAchado.modelData.campo, itemAchado.modelData.a.valor, itemAchado.modelData.nome)
+                        }
+                    }
+                }
+                Rotulo { visible: !!painelDescoberta.d && painelDescoberta.d.series.length > 0; text: "Séries usadas" }
+                Repeater {
+                    model: painelDescoberta.d ? painelDescoberta.d.series : []
+                    delegate: RowLayout {
+                        id: linhaSerie
+                        required property var modelData
+                        spacing: 10
+                        Layout.fillWidth: true
+                        Text {
+                            text: (linhaSerie.modelData.modelo === 65 ? "NFC-e" : "NF-e") + " série " + linhaSerie.modelData.serie
+                                  + (linhaSerie.modelData.ambiente === 1 ? " (produção)" : " (homologação)")
+                                  + ": último número " + linhaSerie.modelData.ultimoNumero + " · " + linhaSerie.modelData.notas
+                                  + (linhaSerie.modelData.notas === 1 ? " nota" : " notas")
+                            textFormat: Text.PlainText
+                            color: Tema.tinta
+                            font.family: Tema.texto
+                            font.pixelSize: 14
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Botao {
+                            visible: linhaSerie.modelData.ambiente === 1
+                            text: "Usar esta série"
+                            tipo: "discreto"
+                            onClicked: emissao.usar(linhaSerie.modelData.modelo === 65 ? "serieNfce" : "serieNfe", linhaSerie.modelData.serie,
+                                                    "A série da " + (linhaSerie.modelData.modelo === 65 ? "NFC-e" : "NF-e"))
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

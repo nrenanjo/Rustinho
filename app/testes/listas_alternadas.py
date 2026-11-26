@@ -45,6 +45,8 @@ CLASSES = {
     ("DetalheDre.qml", "janelinha.d ? (janelinha.d.itens"): ("LISTA", "lançamentos de uma linha da DRE"),
     ("EmissaoFiscal.qml", '["NFC-e'): ("FORA", ESCOLHA),
     ("EmissaoFiscal.qml", "emissao.passos"): ("FORA", "passos da configuração fiscal (FIS-P4)"),
+    ("EmissaoFiscal.qml", "!painelDescoberta.d ? [] : ["): ("FORA", RESUMO + " (dados achados nas notas, T010b)"),
+    ("EmissaoFiscal.qml", "painelDescoberta.d ? painelDescoberta.d.series"): ("FORA", RESUMO + " (séries achadas, T010b)"),
     ("SecaoNotasFiscais.qml", "secao.indicadores"): ("FORA", ESCOLHA + " (indicadores que filtram, FIS-P1)"),
     ("SecaoNotasFiscais.qml", "secao.painel ? secao.painel.notas"): ("LISTA", "notas fiscais emitidas (FIS-P1)"),
     ("SecaoNotasFiscais.qml", "secao.detalhe ? secao.detalhe.eventos"): ("LISTA", "histórico da nota (FIS-P2)"),
