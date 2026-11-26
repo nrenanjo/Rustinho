@@ -44,6 +44,9 @@ use crate::erro::{Erro, Resultado};
 use crate::{banco, config, sync, tempo, texto};
 
 /// Começo de todo arquivo de backup do Rustinho.
+/// E7-2 e E7-3 (0.9.19, etapa 7): o cofre contínuo (lotes).
+mod cofre;
+
 const MAGICA: &[u8; 8] = b"RUSTBKP1";
 const EXTENSAO: &str = "rbk";
 /// Nome da conexão do rclone com o Google Drive.
@@ -1379,6 +1382,8 @@ pub fn automatico(caminho_db: PathBuf) {
             let _ = anotar(&conn, &r);
         }
         let _ = enviar_pendentes(&conn, &caminho_db);
+        // E7-2: o cofre contínuo, na mesma volta (o temporizador de 60 s da tela). O erro fica anotado nele.
+        let _ = cofre::volta(&conn, &caminho_db);
     });
 }
 
@@ -2360,7 +2365,7 @@ pub(crate) mod testes {
     use crate::banco::Banco;
 
     /// Restaurar usa a vez única do backup: um teste desses de cada vez.
-    static UM_POR_VEZ: Mutex<()> = Mutex::new(());
+    pub(super) static UM_POR_VEZ: Mutex<()> = Mutex::new(());
 
     /// A mesma vez, para os testes de outros módulos que restauram ou mexem
     /// nas variáveis do rclone.
@@ -2368,7 +2373,7 @@ pub(crate) mod testes {
         UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn pasta_teste(nome: &str) -> PathBuf {
+    pub(super) fn pasta_teste(nome: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("rustinho-teste-backup-{nome}-{}", tempo::novo_id()));
         std::fs::create_dir_all(&p).unwrap();
         p
