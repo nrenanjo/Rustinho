@@ -104,14 +104,16 @@ Popup {
         color: painel.cor
         radius: Tema.raio + 3
         // BUG-20261120-TJ8X: absorve toques no fundo da janelinha para não vazarem a TapHandlers abaixo.
-        // T035 da 005 (M-1 da R13): com a política padrão, este TapHandler só pegava posse PASSIVA, e o toque numa linha
-        // tocável DENTRO da janelinha (ex.: um cliente na lista da nova encomenda) chegava também ao TapHandler da linha
-        // da tela de trás (escolhia a encomenda atrás). Com ReleaseWithinBounds ele toma a posse exclusiva do toque que
-        // chega ao fundo, e a entrega não desce para a tela de trás.
+        // T035 da 005 (M-1 da R13): com a política padrão, este TapHandler só pegava posse PASSIVA, e o CLIQUE DO MOUSE
+        // numa linha tocável DENTRO da janelinha (ex.: um cliente na lista da nova encomenda) chegava também ao
+        // TapHandler da linha da tela de trás (escolhia a encomenda atrás). No toque (celular) não vazava. Com
+        // ReleaseWithinBounds ele toma a posse exclusiva do clique que chega ao fundo, e a entrega não desce.
+        // T036 (B-1 da R14): ApprovesTakeOverByAnything deixa um handler do conteúdo (um DragHandler, por exemplo) tomar
+        // a posse quando o gesto dele começa; sem isso, um arrasto com o mouse dentro da janelinha não andaria.
         TapHandler {
             acceptedButtons: Qt.AllButtons
             gesturePolicy: TapHandler.ReleaseWithinBounds
-            grabPermissions: PointerHandler.CanTakeOverFromAnything
+            grabPermissions: PointerHandler.CanTakeOverFromAnything | PointerHandler.ApprovesTakeOverByAnything
         }
         // T033 da 005 (M-1 da R12): o TapHandler acima não ACEITA o clique (a entrega continua para baixo). Um clique que
         // nenhum controle da janelinha aceita (num botão desligado, por exemplo o "Trocar" com impedimento) atravessava

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""T035 da 005 (M-1 da R13): o toque numa linha tocável DENTRO de uma janelinha não atravessa para a linha da tela de trás.
+"""T035 da 005 (M-1 da R13): o clique do mouse numa linha tocável DENTRO de uma janelinha não atravessa para a linha da
+tela de trás (no toque do celular, nem antes vazava).
 
 Caso real: Estoque › Encomendas com três encomendas; "Nova encomenda"; no campo Cliente, a busca lista os clientes
 (linhas com TapHandler) por cima da lista de encomendas (linhas com TapHandler que escolhem a encomenda e mostram os
@@ -75,7 +76,18 @@ def caso(placar, fotos):
             time.sleep(1.5)
             if not ok("as encomendas aparecem", r.esperar(lambda: all(r.tem(t) for t in TITULOS), 15), r.foto("-1")):
                 return
+            # B-4 da R14: o controle positivo do sensor. Antes de abrir a janelinha, escolhe com o mouse uma encomenda que
+            # NÃO fica atrás do clique (a "Pastilha dianteira") e confere que o sensor a vê; depois, exige o mesmo
+            # resultado (se vazar, os botões mudam para a linha de trás).
+            pastilha = [(x, y) for x, y, t in r.textos() if t == "Pastilha dianteira"]
+            if pastilha:
+                r.clicar_em(*pastilha[0])
+                time.sleep(0.8)
             antes = escolhidos(r)
+            print(f"MEDIDA: \"Cancelar encomenda\" com a Pastilha escolhida: {antes}", flush=True)
+            if not ok("CONTROLE: o sensor vê a encomenda escolhida (os botões da Pastilha à vista)",
+                      bool(pastilha) and len(antes) == 1 and abs(antes[0][1] - (pastilha[0][1] + 8)) < 25, r.foto("-1b")):
+                return
             r.clicar("Nova encomenda")
             if not ok("a janelinha da nova encomenda abre", r.esperar(lambda: r.tem("Para o cliente que paga"), 10),
                       r.foto("-2")):
@@ -90,7 +102,10 @@ def caso(placar, fotos):
             cliente = linha_do_cliente(r, "Zé da Oficina")[-1]
             # O controle: alguma linha de encomenda atrás está na mesma altura da linha do cliente (a linha da
             # encomenda tem 66 px; o título fica ~11 px acima do meio).
-            atras = [(t, y) for x, y, t in r.textos() if t in TITULOS and abs((y + 11) - cliente[1]) < 30]
+            # A linha de encomenda ocupa a largura da lista (x de 32 a 1248): o controle confere a altura e que o x do
+            # clique está dentro dela (B-4 da R14); a Pastilha (escolhida antes) não pode ser a de trás.
+            atras = [(t, y) for x, y, t in r.textos() if t in TITULOS and t != "Pastilha dianteira"
+                     and abs((y + 11) - cliente[1]) < 30 and 32 < cliente[0] < 1248]
             print(f"MEDIDA: cliente em {cliente}; linhas de trás na mesma altura: {atras}", flush=True)
             if not ok("CONTROLE: há uma linha de encomenda atrás da linha do cliente (senão, não mede nada)",
                       bool(atras), f):
@@ -103,7 +118,7 @@ def caso(placar, fotos):
                not any(abs(y - cliente[1]) < 6 for _, y in linha_do_cliente(r, "Zé da Oficina")), f)
             depois = escolhidos(r)
             print(f"MEDIDA: \"Cancelar encomenda\" antes {antes}, depois {depois}", flush=True)
-            ok("o toque na janelinha não escolhe a encomenda de trás (os botões dela não mudam)",
+            ok("o clique na janelinha não escolhe a encomenda de trás (os botões continuam na Pastilha)",
                len(depois) == len(antes) and all(abs(a[1] - d[1]) <= 4 for a, d in zip(antes, depois)), f)
         finally:
             r.fechar()
