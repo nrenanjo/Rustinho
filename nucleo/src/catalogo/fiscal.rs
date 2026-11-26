@@ -1182,11 +1182,13 @@ mod testes {
         config::gravar(&b.conn, CHAVE_CATALOGO, "0").unwrap();
         let log = |b: &Banco| -> i64 { b.conn.query_row("SELECT COUNT(*) FROM alteracao", [], |l| l.get(0)).unwrap() };
         let antes = log(&b);
-        // GO entra; RS 16 do programa não (a da loja, aberta desde 01/01/2026, vale no período).
-        assert_eq!(crate::sync::sem_registrar(&b.conn, carregar_regras_do_programa).unwrap(), 1);
+        // Um caixa que ainda não aplicou a versão 1: GO e BA entram; RS 16 do programa não (a da loja, aberta desde
+        // 01/01/2026, vale no período).
+        assert_eq!(crate::sync::sem_registrar(&b.conn, carregar_regras_do_programa).unwrap(), 2);
         assert_eq!(log(&b), antes, "o catálogo não vai para o log da troca");
         let lista = regras(&b.conn).unwrap();
         assert!(lista.iter().any(|r| r.id == "go-pneus-com-st" && r.origem == "rustinho"));
+        assert!(lista.iter().any(|r| r.id == "ba-pneus-com-st" && r.origem == "rustinho"));
         assert!(!lista.iter().any(|r| r.id == "rs-pneus-com-st" || r.id == "rs-pneus-sem-st"));
         let aplicando: i64 =
             b.conn.query_row("SELECT aplicando FROM sync_estado WHERE id = 1", [], |l| l.get(0)).unwrap();
