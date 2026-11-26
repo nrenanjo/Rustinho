@@ -110,6 +110,7 @@ ColumnLayout {
                     Text {
                         anchors.centerIn: parent
                         text: passo.modelData.pronto ? "✓" : String(passo.index + 1)
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.weight: Font.Bold
