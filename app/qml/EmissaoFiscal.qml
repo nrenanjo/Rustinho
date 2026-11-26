@@ -3,13 +3,33 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import rustinho
 
-// Configurações › Simultaneidade › Fiscal (0.9.15): a emissão de notas pelo
+// Configurações › Fiscal (0.9.15; FIS-CAT e FIS-P4 na 0.9.19): a emissão de notas pelo
 // Rustinho, como está de verdade hoje. A emissão e a integração com um
 // emissor fiscal ainda não existem: nada aqui finge estado, documento ou
 // pendência. Quando existirem, estes blocos mostram os dados reais.
 ColumnLayout {
     id: emissao
     readonly property var janela: ApplicationWindow.window
+    // Vêm da tela Fiscal: o seletor do FIS-LIGA, a UF e o CNPJ da loja e a
+    // conferência das peças.
+    property var liga: null
+    property var dadosDaLoja: null
+    property var dados: null
+    readonly property bool ligado: !!liga && liga.ligado
+    readonly property int semNcm: dados ? dados.semNcm.length : 0
+    readonly property bool lojaPronta: !!dadosDaLoja && dadosDaLoja.satisfeito
+    readonly property var passos: [
+        { titulo: "1. Emissor fiscal", situacao: "ainda não disponível", pronto: false,
+          explicacao: "A ligação com o emissor (o ACBrMonitorPLUS deste computador) ainda não está pronta nesta versão." },
+        { titulo: "2. Certificado A3", situacao: ligado ? "liberado neste computador" : "desligado neste computador", pronto: ligado,
+          explicacao: ligado ? "Um gerente liberou o uso do certificado A3 aqui." : "Um gerente liga em \"Certificado A3 e integração fiscal\", acima." },
+        { titulo: "3. Testar a conexão", situacao: "depois dos passos 1 e 2", pronto: false,
+          explicacao: "O Rustinho confere a ligação com a SEFAZ em homologação, sem nota de verdade." },
+        { titulo: "4. Condições para emitir", situacao: lojaPronta && semNcm === 0 ? "cadastro em dia" : "falta acertar", pronto: false,
+          explicacao: (lojaPronta ? "UF e CNPJ da loja informados. " : "Falta informar a UF e o CNPJ da loja. ")
+                      + (semNcm === 0 ? "Nenhuma peça sem NCM. " : semNcm + (semNcm === 1 ? " peça sem NCM. " : " peças sem NCM. "))
+                      + "O regime da loja (Simples Nacional ou outro) fica com o contador." }
+    ]
     spacing: 12
 
     // Ícone grande num círculo (os blocos vazios).
@@ -76,31 +96,57 @@ ColumnLayout {
         }
     }
 
+    // FIS-P4 (0.9.19, etapa 3; texto A §15): o que falta para emitir, numa
+    // sequência só (emissor → certificado → testar → condições), cada passo
+    // com a situação de verdade. Sem botão que não leva a lugar nenhum.
     Faixa {
+        titulo: "Para emitir notas pelo Rustinho"
         color: Tema.azul
         Layout.fillWidth: true
-        espacamento: 8
-        Selo { icone: "documentoElo" }
-        Titulo {
-            text: "Integração fiscal ainda não configurada"
-            font.pixelSize: Tema.estreito ? 24 : 30
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-            Layout.topMargin: 6
-        }
-        Nota {
-            text: "Configure um emissor fiscal compatível para habilitar a emissão de documentos."
-            horizontalAlignment: Text.AlignHCenter
-            Layout.fillWidth: true
-        }
-        Botao {
-            text: "Ver opções de integração"
-            icone: "engrenagem"
-            Layout.alignment: Qt.AlignHCenter
-            Layout.topMargin: 6
-            onClicked: emissao.janela.avisar("A integração com um emissor fiscal ainda está em planejamento e chega numa próxima versão. "
-                                             + "Por enquanto o Rustinho não emite notas.", "info")
+        espacamento: 10
+        Repeater {
+            model: emissao.passos
+            delegate: RowLayout {
+                id: passo
+                required property var modelData
+                required property int index
+                spacing: 14
+                Layout.fillWidth: true
+                Rectangle {
+                    implicitWidth: 34
+                    implicitHeight: 34
+                    radius: 17
+                    color: passo.modelData.pronto ? Tema.verde : Tema.papel
+                    Layout.alignment: Qt.AlignTop
+                    Text {
+                        anchors.centerIn: parent
+                        text: passo.modelData.pronto ? "✓" : String(passo.index + 1)
+                        color: Tema.tinta
+                        font.family: Tema.texto
+                        font.weight: Font.Bold
+                        font.pixelSize: 16
+                    }
+                }
+                ColumnLayout {
+                    spacing: 2
+                    Layout.fillWidth: true
+                    Text {
+                        text: passo.modelData.titulo + " · " + passo.modelData.situacao
+                        textFormat: Text.PlainText
+                        color: Tema.tinta
+                        font.family: Tema.texto
+                        font.weight: Font.DemiBold
+                        font.pixelSize: 16
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Nota {
+                        text: passo.modelData.explicacao
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                }
+            }
         }
     }
 
@@ -127,45 +173,4 @@ ColumnLayout {
         }
     }
 
-    Faixa {
-        titulo: "Estado da integração"
-        color: Tema.azul
-        Layout.fillWidth: true
-        Linha {
-            spacing: 18
-            Layout.fillWidth: true
-            Rectangle {
-                radius: Tema.raioCampo
-                color: Tema.papel
-                implicitWidth: estado.implicitWidth + 40
-                implicitHeight: 44
-                Row {
-                    id: estado
-                    anchors.centerIn: parent
-                    spacing: 10
-                    Rectangle { width: 14; height: 14; radius: 7; color: Tema.apagado; anchors.verticalCenter: parent.verticalCenter }
-                    Text {
-                        text: "Não configurada"
-                        color: Tema.tinta
-                        font.family: Tema.texto
-                        font.weight: Font.Bold
-                        font.pixelSize: 16
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
-            }
-            Rectangle {
-                visible: !Tema.fino
-                implicitWidth: 1
-                implicitHeight: 34
-                color: Tema.sombra(0.25)
-                Layout.alignment: Qt.AlignVCenter
-            }
-            Nota {
-                text: "A emissão fiscal ainda não está habilitada neste caixa."
-                Layout.fillWidth: true
-                Layout.alignment: Qt.AlignVCenter
-            }
-        }
-    }
 }

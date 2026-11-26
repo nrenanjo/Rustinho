@@ -348,7 +348,12 @@ FocusScope {
             }
 
             // A emissão de notas (0.9.15: o estado real, sem nada inventado).
-            EmissaoFiscal { Layout.fillWidth: true }
+            EmissaoFiscal {
+                liga: tela.liga
+                dadosDaLoja: tela.dadosDaLoja
+                dados: tela.dados
+                Layout.fillWidth: true
+            }
 
             Linha {
                 id: corpo

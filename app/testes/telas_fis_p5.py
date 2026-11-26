@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""FIS-P5 e FIS-P6 (0.9.19, etapa 3; texto A §16 e doc 10): as regras de ST na tela Fiscal.
+"""FIS-P4, FIS-P5 e FIS-P6 (0.9.19, etapa 3; texto A §15 e §16 e doc 10): a configuração fiscal e as regras de ST.
+
+- FIS-P4: uma sequência só (emissor → certificado → testar → condições), sem cartões repetindo "não configurada"
+  e sem botão que não leva a lugar nenhum.
 
 - A consulta fica separada da edição: as regras do estado aparecem em "Valendo hoje", "Vão valer" e "Encerradas",
   cada uma com o CEST, se tem ST, o período e a fonte.
@@ -52,6 +55,16 @@ def clicar_rolando(r, texto):
     return False
 
 
+def rolar_ate(r, texto):
+    """Rola até o texto ficar visível, sem clicar (para a foto)."""
+    for _ in range(25):
+        achados = [y for x, y, t in r.textos_para_clicar() if t == texto]
+        if not achados or 280 < achados[0] < 700:
+            return
+        xdo("mousemove", "640", "420", "click", "--repeat", "3", "5" if achados[0] >= 700 else "4")
+        time.sleep(0.6)
+
+
 def tecla(*teclas):
     for t in teclas:
         xdo("key", t)
@@ -75,6 +88,14 @@ def main():
             tudo_certo &= conferir("FIS-P5: as regras do estado, separadas e com a fonte", r.foto("-1"), r.textos(),
                                    tem=["Valendo hoje", "Encerradas", "CEST 01 · sem ST · desde 01/10/2026",
                                         "Fonte: Portaria SRE 34/2026", "lida em 24/11/2026"])
+            tudo_certo &= conferir("FIS-P4: a sequência emissor → certificado → testar → condições, sem repetir", r.foto("-1a"),
+                                   r.textos(), tem=["Para emitir notas pelo Rustinho", "1. Emissor fiscal · ainda não disponível",
+                                                    "2. Certificado A3 · desligado neste computador", "3. Testar a conexão",
+                                                    "4. Condições para emitir"],
+                                   nao_tem=["Integração fiscal ainda não configurada", "Ver opções de integração",
+                                            "Estado da integração"])
+            rolar_ate(r, "1. Emissor fiscal · ainda não disponível")
+            r.foto("-1c-sequencia")
             tudo_certo &= conferir("FIS-P5: o monofásico é informação, com o fim em 31/12/2026", r.foto("-1b"),
                                    r.textos(), tem=["não um erro", "31/12/2026"])
             # "Mudar" a primeira regra (SP 01, sem ST, já valeu): o aviso de que o essencial fica.
