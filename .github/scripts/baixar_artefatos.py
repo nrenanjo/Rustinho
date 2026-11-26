@@ -27,6 +27,7 @@ import zipfile
 CONSULTA = ".artifacts[] | [.name, (.id | tostring), .created_at, (.expired | tostring), (.digest // \"\")] | @tsv"
 TENTATIVAS = 3
 ESPERA = float(os.environ.get("BAIXAR_ARTEFATOS_ESPERA", "5"))  # segundos (os testes usam 0)
+TEMPO = float(os.environ.get("BAIXAR_ARTEFATOS_TEMPO", "600"))  # limite de cada chamada do gh, em segundos
 
 
 def escolher(linhas):
@@ -88,10 +89,14 @@ def extrair(dados, destino):
 
 def gh(*args):
     for tentativa in range(1, TENTATIVAS + 1):
-        r = subprocess.run(["gh", "api", *args], capture_output=True)
-        if r.returncode == 0:
-            return r.stdout
-        erro = r.stderr.decode(errors="replace").strip()
+        try:
+            r = subprocess.run(["gh", "api", *args], capture_output=True, timeout=TEMPO)
+        except subprocess.TimeoutExpired:
+            erro = f"passou de {TEMPO:.0f} s sem terminar"
+        else:
+            if r.returncode == 0:
+                return r.stdout
+            erro = r.stderr.decode(errors="replace").strip()
         print(f"::warning title=gh api::tentativa {tentativa} de {TENTATIVAS} falhou: {' '.join(args[:2])}: {erro}")
         if tentativa < TENTATIVAS:
             time.sleep(ESPERA * tentativa)

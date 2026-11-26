@@ -232,6 +232,11 @@ def main():
             if pasta == "pacote":
                 exigir((p.get("env") or {}).get("EXECUCAO") == "${{ inputs.execucao }}",
                        f"{arq}: o passo do baixar_artefatos.py do {nome} não passa a execução indicada (T031)")
+                exigir(p.get("shell") == "bash",
+                       f"{arq}: o passo do baixar_artefatos.py do {nome} não roda em bash (o $EXECUCAO, T031)")
+            if nome == "windows":
+                exigir(str((p.get("env") or {}).get("PYTHONUTF8")) == "1",
+                       f"{arq}: o passo do baixar_artefatos.py do windows não tem PYTHONUTF8: \"1\" (acentos no log, T031)")
             antes = [i for i, q in enumerate(passos_job) if i != idx[0] and pasta in str(q.get("run", ""))]
             exigir(all(i > idx[0] for i in antes),
                    f"{arq}: o {nome} usa os artefatos antes de baixá-los pelo baixar_artefatos.py (T031)")

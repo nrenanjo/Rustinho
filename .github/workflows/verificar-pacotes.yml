@@ -50,6 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EXECUCAO: ${{ inputs.execucao }}
+          PYTHONUTF8: "1"
         run: python .github/scripts/baixar_artefatos.py pacote --nome Rustinho-Windows --execucao "$EXECUCAO"
       - name: Instalar, conferir, abrir e desinstalar
         shell: pwsh

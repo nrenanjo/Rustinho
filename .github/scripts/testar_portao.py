@@ -563,6 +563,9 @@ if a[1] == "--paginate":
         sys.stderr.write("HTTP 404: execução errada\n")
         sys.exit(1)
     sys.stdout.write(cfg["lista"])
+elif a[1].endswith("/zip") and cfg.get("dormir"):
+    import time
+    time.sleep(cfg["dormir"])
 elif a[1].endswith("/zip"):
     ident = a[1].split("/artifacts/")[1].split("/")[0]
     sys.stdout.buffer.write(open(os.path.join(cfg["zips"], ident + ".zip"), "rb").read())
@@ -690,13 +693,13 @@ class BaixarArtefatosMain(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.d, ignore_errors=True)
 
-    def rodar(self, *args, execucao_env="777"):
+    def rodar(self, *args, execucao_env="777", tempo="600"):
         cfg = os.path.join(self.d, "cfg.json")
         with open(cfg, "w", encoding="utf-8") as f:
             json.dump(self.cfg, f)
         env = dict(os.environ, PATH=os.path.join(self.d, "bin") + os.pathsep + os.environ["PATH"],
                    GH_FALSO_CFG=cfg, GITHUB_REPOSITORY="dono/repo", GITHUB_RUN_ID=execucao_env,
-                   BAIXAR_ARTEFATOS_ESPERA="0")
+                   BAIXAR_ARTEFATOS_ESPERA="0", BAIXAR_ARTEFATOS_TEMPO=tempo)
         return subprocess.run([sys.executable, "-I", os.path.join(AQUI, "baixar_artefatos.py"), self.destino, *args],
                               capture_output=True, text=True, env=env)
 
@@ -718,6 +721,20 @@ class BaixarArtefatosMain(unittest.TestCase):
         r = self.rodar("--nome", "Manifesto", "--execucao", "555")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(sorted(os.listdir(self.destino)), ["MANIFESTO.json", "NOTAS.md"])
+
+    def test_um_nome_com_outro_nome_repetido_na_execucao(self):
+        # R16-B1: o shard 3 repetido (como num "Re-run failed jobs") não atrapalha baixar só o Manifesto.
+        self.cfg["lista"] += "Telas-Linux-shard-3\t49\t2026-11-25T23:00:00Z\tfalse\t\n"
+        r = self.rodar("--nome", "Manifesto")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(sorted(os.listdir(self.destino)), ["MANIFESTO.json", "NOTAS.md"])
+
+    def test_download_travado_vira_falha_e_tenta_de_novo(self):
+        # R16-B4: uma chamada do gh que não termina conta como falha (sem prender o job por horas).
+        self.cfg["dormir"] = 5
+        r = self.rodar("--nome", "Manifesto", tempo="0.5")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("passou de 0 s sem terminar", r.stdout)
 
     def test_execucao_vazia_e_a_atual(self):
         r = self.rodar("--nome", "Manifesto", "--execucao", "")
@@ -804,6 +821,18 @@ class FormaT031(unittest.TestCase):
         def f(w, j):
             j["permissions"] = {"contents": "read"}
         self.cada(f, "{arq}: o {job} não pode ler a lista de artefatos")
+
+    def test_verificacao_sem_bash_reprova(self):
+        for arq, job in self.ONDE[3:]:
+            with self.subTest(job=job):
+                self.tearDown()
+                self.setUp()
+                self.mexer(arq, job, lambda w, j: self.passo(j).pop("shell"))
+                self.reprova_com(f"{arq}: o passo do baixar_artefatos.py do {job} não roda em bash")
+
+    def test_windows_sem_utf8_reprova(self):
+        self.mexer("verificar-pacotes.yml", "windows", lambda w, j: self.passo(j)["env"].pop("PYTHONUTF8"))
+        self.reprova_com("verificar-pacotes.yml: o passo do baixar_artefatos.py do windows não tem PYTHONUTF8")
 
     def test_verificacao_sem_a_execucao_indicada_reprova(self):
         for arq, job in self.ONDE[3:]:
