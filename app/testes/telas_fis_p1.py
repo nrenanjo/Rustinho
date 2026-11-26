@@ -126,10 +126,18 @@ def main():
             time.sleep(1)
             tudo_certo &= conferir("FIS-P3: com impedimento, a confirmação não aceita texto", r.foto("-5b"), r.textos(),
                                    tem=["Ainda não dá para trocar"], nao_tem=["zqxwvk"])
+            # T035 (B-1 da R13): o controle. A conferência abaixo só prova algo se houver uma linha de nota (tocável)
+            # atrás do "Trocar"; sem ela, reprova como "não medido" (um ajuste de layout não a esvazia em silêncio).
+            linhas_atras = [(t, y) for _, y, t in alvos
+                            if t.startswith("NFC-e ") and "(série" in t and abs((y + 12) - botoes[-1][1]) < 30]
+            print(f"MEDIDA FIS-P3: Trocar em {botoes[-1]}; linhas de nota atrás: {linhas_atras}", flush=True)
+            tudo_certo &= conferir("FIS-P3: CONTROLE: há uma linha de nota atrás do Trocar (senão, não mede nada)",
+                                   r.foto("-5ba"), [(0, 0, "ok")] if linhas_atras else [], tem=["ok"])
             xdo("mousemove", str(botoes[-1][0]), str(botoes[-1][1]), "click", "1")
             time.sleep(1.5)
             # T033 (M-1 da R12): o clique no "Trocar" desligado não atravessa a janelinha: nada abre por baixo (antes,
-            # com uma linha de nota atrás do botão, abria o detalhe dela, invisível, e o Esc seguinte o fechava).
+            # com uma linha de nota atrás do botão, abria o detalhe dela, visível, POR CIMA da janela da troca; B-3 da
+            # R13), e o Esc seguinte o fechava.
             tudo_certo &= conferir("FIS-P3: o clique no Trocar desligado não abre nada por baixo", r.foto("-5bb"),
                                    r.textos(), nao_tem=["Semeada pelo teste"])
             # T033 (M-1 da R12): UM Esc fecha a janela da troca ("Esc igual à seta", decisão do proprietário). O roteiro
@@ -144,10 +152,10 @@ def main():
             aberta = any(t == "Ir para a produção" for _, _, t in r.textos())
             print(f"MEDIDA FIS-P3: a janela da troca precisou de {precisou} Esc para fechar (aberta no fim: {aberta})",
                   flush=True)
-            if not conferir("FIS-P3: um Esc fecha a janela da troca", r.foto("-5c"), r.textos(),
-                            nao_tem=["Ir para a produção"]) or precisou != 1:
-                tudo_certo = False
-                print(f"✘ FIS-P3: um Esc fecha a janela da troca: precisou de {precisou}")
+            # B-2 da R13: uma conferência só (antes, um ✔ e um ✘ com o mesmo nome).
+            tudo_certo &= conferir(f"FIS-P3: um Esc fecha a janela da troca (precisou de {precisou})", r.foto("-5c"),
+                                   r.textos() + ([] if precisou == 1 else [(0, 0, "MARCA_MAIS_DE_UM_ESC")]),
+                                   nao_tem=["Ir para a produção", "MARCA_MAIS_DE_UM_ESC"])
             tudo_certo &= conferir("FIS-P3: com impedimento, o ambiente continua o mesmo", r.foto("-6"), r.textos(),
                                    tem=["Ambiente: homologação (teste, sem valor fiscal)"], nao_tem=["Ambiente fiscal trocado."])
             # K12 da R2: o controle positivo do jeito de clicar e digitar usado acima. No campo ligado ("Procurar"), o

@@ -168,6 +168,13 @@ class Rustinho(base.Rustinho):
     def _esperar_janela(self):
         """A janela de verdade deste Rustinho (visível, de mais de 200 px), em até 30 s."""
         for _ in range(150):
+            # T034 da 005 (CI 45881659968): se o programa já saiu, não há janela a esperar; o erro diz o porquê (lá, o
+            # registro dizia "could not connect to display", e o roteiro esperava 30 s e dizia "não apareceu").
+            if self.p.poll() is not None:
+                with open(self.saida, errors="replace") as fh:
+                    motivo = " | ".join(ln.strip() for ln in fh.readlines()[:3])
+                raise RuntimeError(f"INSTRUMENTAÇÃO: o Rustinho saiu antes de abrir a janela (código {self.p.returncode}: "
+                                   f"{motivo}) (veja {self.saida})")
             s = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(self.p.pid)],
                                env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
             for j in s.stdout.split():
@@ -1034,9 +1041,20 @@ def caso7(placar, fotos):
             r.esperar(lambda: r.tem_igual("Ver o registro"))
             r.clicar("Ver o registro")
             r.esperar(lambda: r.tem(TITULO_7))
+            # T034 da 005 (CI 45881659968, Qt 6.8.3): o clique logo depois de a guia chegar (a rolagem ainda andando) só
+            # parava a rolagem, e a pergunta não abria; é o mesmo caso da s7 do telas_c8_rerevisao2. Agora espera o que
+            # o programa diz (o destaque assentado e nada se movendo), rola, espera parar e confere que a pergunta abriu.
+            def assentada():
+                tx = {t for _, _, t in r.textos()}
+                return "TESTE_DESTAQUE_ATIVO:1" in tx and "TESTE_MOVIMENTO_ATIVO:0" in tx
+            esperou = time.time()
+            ok("7: a guia assenta (destaque ativo, nada se movendo) em até 30 s", r.esperar(assentada, 30))
+            print(f"MEDIDA 7: a guia assentada {time.time() - esperou:.1f} s depois de chegar", flush=True)
             r.rolar_ate("Aceitar como está")
+            ok("7: depois de rolar, a tela para em até 15 s",
+               r.esperar(lambda: "TESTE_MOVIMENTO_ATIVO:0" in {t for _, _, t in r.textos()}, 15))
             r.clicar_ultimo("Aceitar como está")
-            r.esperar(lambda: r.tem("Aceitar como está?"))
+            ok("7: a pergunta do aceite abre", r.esperar(lambda: r.tem("Aceitar como está?")), r.foto("-4b"))
             time.sleep(0.5)
             r.digitar("Caixa de origem perdido")
             time.sleep(0.3)
