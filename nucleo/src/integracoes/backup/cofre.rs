@@ -183,6 +183,71 @@ pub(super) fn volta(conn: &Connection, caminho_db: &Path) -> Resultado<usize> {
     r
 }
 
+/// E7-4 (P-10 (a), decisão do proprietário de 26/11/2026; testes 16 a 18 de `docs/SIMULTANEIDADE-requisitos.md`): o estado
+/// da proteção deste computador. `nivel`:
+/// - "sem_cofre": o Drive está desligado (nada é declarado protegido);
+/// - "em_dia": nenhuma alteração deste computador sem prova;
+/// - "atencao": há alteração deste computador sem prova (pendente);
+/// - "critico": a mais antiga sem prova tem mais de 24 h.
+///
+/// Uma alteração deste computador só está protegida com prova gravada: o lote dela conferido no Drive (`CONFERIDO_ATE`),
+/// ou ela é anterior à HORA DA CÓPIA do dia que foi conferida no Drive (pelo nome da cópia, e não pela hora da
+/// conferência, que viria depois e cobriria alterações que a cópia não tem). As de outros caixas são de cada um.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Protecao {
+    pub nivel: String,
+    pub pendentes: i64,
+    pub desde: Option<String>,
+}
+
+/// A hora (UTC, RFC 3339) em que foi feita a cópia do dia conferida no Drive, pelo nome dela (hora local).
+fn hora_da_copia_conferida(conn: &Connection) -> Resultado<Option<String>> {
+    let Some(texto) = config::ler(conn, CONFERIDA_NO_DRIVE)? else { return Ok(None) };
+    let Ok(v) = serde_json::from_str::<Value>(&texto) else { return Ok(None) };
+    let Some(b) = v["nome"].as_str().and_then(ler_nome) else { return Ok(None) };
+    let local = format!(
+        "{}-{}-{} {}:{}:{}",
+        &b.dia[..4],
+        &b.dia[4..6],
+        &b.dia[6..8],
+        &b.hora[..2],
+        &b.hora[2..4],
+        &b.hora[4..6]
+    );
+    Ok(conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%SZ', ?1, 'utc')", [&local], |l| l.get(0))?)
+}
+
+pub fn protecao(conn: &Connection) -> Resultado<Protecao> {
+    if config::ler(conn, "backup_nuvem")?.as_deref() != Some("1") {
+        return Ok(Protecao { nivel: "sem_cofre".into(), pendentes: 0, desde: None });
+    }
+    let este = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+    let conferido = ler_seq(conn, CONFERIDO_ATE)?.unwrap_or(-1);
+    let copia = hora_da_copia_conferida(conn)?;
+    let (pendentes, desde): (i64, Option<String>) = conn.query_row(
+        "SELECT COUNT(*), MIN(quando) FROM alteracao
+          WHERE dispositivo = ?1 AND seq > ?2 AND (?3 IS NULL OR julianday(quando) > julianday(?3))",
+        params![este, conferido, copia],
+        |l| Ok((l.get(0)?, l.get(1)?)),
+    )?;
+    let nivel = if pendentes == 0 {
+        "em_dia"
+    } else {
+        let horas: f64 = conn
+            .query_row("SELECT (julianday('now') - julianday(?1)) * 24", [desde.as_deref().unwrap_or("")], |l| {
+                l.get::<_, Option<f64>>(0)
+            })?
+            .unwrap_or(0.0);
+        if horas > 24.0 {
+            "critico"
+        } else {
+            "atencao"
+        }
+    };
+    Ok(Protecao { nivel: nivel.into(), pendentes, desde })
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -281,6 +346,52 @@ mod testes {
         assert!(ler_seq(&b.conn, CONFERIDO_ATE).unwrap().unwrap() > ate);
         std::env::remove_var("RUSTINHO_REMOTO");
         let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    }
+
+    /// Testes 16, 17 e 18 (E7-4): nada é "em dia" sem prova; o envio sem conferência não protege; a alteração fica
+    /// pendente e vira crítica depois de 24 h; o lote conferido protege; a cópia do dia conferida protege só o que é
+    /// anterior à hora DELA.
+    #[test]
+    fn e7_4_protecao_so_com_prova() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let (b, _caminho, _nuvem) = loja_de_teste("cofre-protecao");
+        config::gravar(&b.conn, "backup_nuvem", "0").unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "sem_cofre", "Drive desligado: não se declara protegido");
+        config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+        // 18: sem nenhuma prova, o que este computador gravou está pendente.
+        let p = protecao(&b.conn).unwrap();
+        assert_eq!(p.nivel, "atencao", "{p:?}");
+        assert!(p.pendentes > 0 && p.desde.is_some());
+        // 16: um lote mandado e não conferido não muda nada (só CONFERIDO_ATE conta).
+        config::gravar(&b.conn, GERADO_ATE, "999999").unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "atencao");
+        // O lote conferido até o fim do registro: em dia.
+        let fim: i64 = b.conn.query_row("SELECT MAX(seq) FROM alteracao", [], |l| l.get(0)).unwrap();
+        config::gravar(&b.conn, CONFERIDO_ATE, &fim.to_string()).unwrap();
+        assert_eq!(protecao(&b.conn).unwrap(), Protecao { nivel: "em_dia".into(), pendentes: 0, desde: None });
+        // 17: uma venda nova (aqui, um usuário) sem lote conferido fica pendente; com mais de 24 h, crítica.
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "atencao");
+        b.conn
+            .execute(
+                "UPDATE alteracao SET quando = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-25 hours') WHERE seq > ?1",
+                [fim],
+            )
+            .unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "critico");
+        // A cópia do dia conferida protege o que é anterior à hora dela (pelo nome), e não o que veio depois.
+        let agora_local: String =
+            b.conn.query_row("SELECT strftime('%Y%m%d-%H%M%S', 'now', 'localtime')", [], |l| l.get(0)).unwrap();
+        let nome = format!("rustinho-{agora_local}-abc.{EXTENSAO}");
+        config::gravar(&b.conn, CONFERIDA_NO_DRIVE, &json!({ "nome": nome }).to_string()).unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "em_dia", "a de 25 h atrás está na cópia de agora");
+        b.conn
+            .execute(
+                "UPDATE alteracao SET quando = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '+1 hour') WHERE seq > ?1",
+                [fim],
+            )
+            .unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "atencao", "a posterior à cópia continua pendente");
     }
 
     #[test]

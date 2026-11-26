@@ -44,8 +44,8 @@ use crate::erro::{Erro, Resultado};
 use crate::{banco, config, sync, tempo, texto};
 
 /// Começo de todo arquivo de backup do Rustinho.
-/// E7-2 e E7-3 (0.9.19, etapa 7): o cofre contínuo (lotes).
-mod cofre;
+/// E7-2 a E7-4 (0.9.19, etapa 7): o cofre contínuo (lotes) e o estado da proteção.
+pub mod cofre;
 
 const MAGICA: &[u8; 8] = b"RUSTBKP1";
 const EXTENSAO: &str = "rbk";
@@ -2342,6 +2342,9 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
         "fazendo": fazendo(),
         "lista": listar(&a.pasta),
         "sincronizacao": sync::ajustes(conn)?.ligado,
+        // E7-4: a proteção deste computador (nunca "em dia" sem prova).
+        "protecao": cofre::protecao(conn)?,
+        "loteErro": config::ler(conn, cofre::LOTE_ERRO)?.unwrap_or_default(),
     }))
 }
 
