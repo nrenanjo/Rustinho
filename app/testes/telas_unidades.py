@@ -150,11 +150,18 @@ class Rustinho(tema.Rustinho):
                 # T037 da 005 (CI 45897908596 e 45881659968): o programa dizia "could not connect to display" no meio de
                 # uma unidade. O erro diz também se a tela virtual ainda responde, para separar "o Xvfb morreu" de "o
                 # Xvfb recusou a conexão" na próxima vez.
-                vivo = subprocess.run(["xdpyinfo", "-display", TELA], capture_output=True).returncode == 0
+                try:
+                    vivo = subprocess.run(["xdpyinfo", "-display", TELA], capture_output=True, timeout=10).returncode == 0
+                except (OSError, subprocess.TimeoutExpired):
+                    vivo = None
+                soquete = os.path.exists(f"/tmp/.X11-unix/X{TELA.lstrip(':')}")
+                estado = {True: "responde", False: "NÃO responde", None: "sem resposta do xdpyinfo"}[vivo]
                 with open(self.saida, errors="replace") as fh:
                     motivo = " | ".join(ln.strip() for ln in fh.readlines()[:2])
                 raise RuntimeError(f"o Rustinho fechou antes de abrir a janela (código {self.p.returncode}: {motivo}; "
-                                   f"a tela virtual {TELA} {'responde' if vivo else 'NÃO responde'}) (veja {self.saida})")
+                                   f"a tela virtual {TELA} {estado} agora; soquete do X "
+                                   f"{'existe' if soquete else 'NÃO existe'}; o xvfb.log nas fotos diz o resto) "
+                                   f"(veja {self.saida})")
             s = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "rustinho"],
                                env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
             if s.stdout.split():

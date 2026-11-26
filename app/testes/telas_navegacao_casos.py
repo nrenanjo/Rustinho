@@ -173,10 +173,15 @@ class Rustinho(base.Rustinho):
             if self.p.poll() is not None:
                 with open(self.saida, errors="replace") as fh:
                     motivo = " | ".join(ln.strip() for ln in fh.readlines()[:3])
-                vivo = subprocess.run(["xdpyinfo", "-display", TELA], capture_output=True).returncode == 0
+                try:
+                    vivo = subprocess.run(["xdpyinfo", "-display", TELA], capture_output=True, timeout=10).returncode == 0
+                except (OSError, subprocess.TimeoutExpired):
+                    vivo = None
+                soquete = os.path.exists(f"/tmp/.X11-unix/X{TELA.lstrip(':')}")
+                estado = {True: "responde", False: "NÃO responde", None: "sem resposta do xdpyinfo"}[vivo]
                 raise RuntimeError(f"INSTRUMENTAÇÃO: o Rustinho saiu antes de abrir a janela (código {self.p.returncode}: "
-                                   f"{motivo}; a tela virtual {TELA} {'responde' if vivo else 'NÃO responde'}) "
-                                   f"(veja {self.saida})")
+                                   f"{motivo}; a tela virtual {TELA} {estado} agora; soquete do X "
+                                   f"{'existe' if soquete else 'NÃO existe'}) (veja {self.saida})")
             s = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(self.p.pid)],
                                env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
             for j in s.stdout.split():

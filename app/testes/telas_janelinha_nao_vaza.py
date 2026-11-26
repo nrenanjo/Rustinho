@@ -116,8 +116,11 @@ def caso(placar, fotos):
             time.sleep(1.2)
             f = r.foto("-4")
             # escolherCliente põe o nome no campo e esvazia a lista (a linha "Zé da Oficina  ·  …" some).
-            ok("o clique escolhe o cliente (a linha da lista some; o nome vai para o campo)",
+            # B-6 da R16: as duas partes são medidas: a linha da lista some, e o nome aparece no campo Cliente (acima dela).
+            ok("o clique escolhe o cliente (a linha da lista some)",
                not any(abs(y - cliente[1]) < 6 for _, y in linha_do_cliente(r, "Zé da Oficina")), f)
+            ok("o clique escolhe o cliente (o nome vai para o campo Cliente)",
+               any(t == "Zé da Oficina" and y < cliente[1] - 6 for _, y, t in r.textos()), f)
             depois = escolhidos(r)
             print(f"MEDIDA: \"Cancelar encomenda\" antes {antes}, depois {depois}", flush=True)
             ok("o clique na janelinha não escolhe a encomenda de trás (os botões continuam na Pastilha)",

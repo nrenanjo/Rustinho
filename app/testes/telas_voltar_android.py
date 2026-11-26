@@ -237,7 +237,11 @@ def main():
                   not problemas and contagem >= 4, "; ".join(problemas) or f"{contagem} setas")
     if subprocess.run(["xdpyinfo", "-display", TELA], capture_output=True).returncode == 0:
         sys.exit(f"a tela virtual {TELA} já está em uso")
-    xvfb = subprocess.Popen(["Xvfb", TELA, "-screen", "0", "1440x1000x24"], stderr=subprocess.DEVNULL)
+    # T038 da 005 (B-4 da R16): a saída do Xvfb vai para um arquivo nas fotos (antes, descartada): nas CIs, o programa
+    # não conectou à tela virtual no meio da unidade ("could not connect to display"), e sem isto não dá para saber se o
+    # Xvfb morreu ou recusou.
+    xvfb_log = open(os.path.join(fotos, "xvfb.log"), "w")
+    xvfb = subprocess.Popen(["Xvfb", TELA, "-screen", "0", "1440x1000x24"], stdout=xvfb_log, stderr=xvfb_log)
     time.sleep(1)
     pasta = tempfile.mkdtemp(prefix="rustinho-loja-voltar-")
     try:

@@ -695,7 +695,11 @@ def main():
     fotos = sys.argv[1] if len(sys.argv) > 1 else tempfile.mkdtemp(prefix="rustinho-fotos-t054-")
     os.makedirs(fotos, exist_ok=True)
     modelo = tempfile.mkdtemp(prefix="rustinho-dados-t054-")
-    xvfb = subprocess.Popen(["Xvfb", TELA, "-screen", "0", "1920x1080x24"], stderr=subprocess.DEVNULL)
+    # T038 da 005 (B-4 da R16): a saída do Xvfb vai para um arquivo nas fotos (antes, descartada): nas CIs, o programa
+    # não conectou à tela virtual no meio da unidade ("could not connect to display"), e sem isto não dá para saber se o
+    # Xvfb morreu ou recusou.
+    xvfb_log = open(os.path.join(fotos, "xvfb.log"), "w")
+    xvfb = subprocess.Popen(["Xvfb", TELA, "-screen", "0", "1920x1080x24"], stdout=xvfb_log, stderr=xvfb_log)
     time.sleep(1)
     casos = os.environ.get("RUSTINHO_CASOS", "CTOFP")
     try:
