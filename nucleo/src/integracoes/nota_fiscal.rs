@@ -57,7 +57,7 @@ const RESULTADOS_DO_PROCESSAMENTO: &[u32] = &[
 ];
 
 /// O que uma resposta da SEFAZ quer dizer para a nota:
-/// - 100 e 150 (MOC 7.0, Anexo I, 4.4.1): autorizada; 110 (4.4.1) e 301, 302 e 303 (4.4.3): denegada;
+/// - 100, 120 e 150 (`nfe_xml::cstat_autorizado`: MOC 7.0, Anexo I, 4.4.1, e NT 2026.002): autorizada; 110 (4.4.1) e 301, 302 e 303 (4.4.3): denegada;
 /// - na consulta: 101 e 151 (4.4.1) e 155 (Visão Geral, 5.9.4), cancelada; 217 ("NF-e não consta na base de dados da
 ///   SEFAZ"), não recebida;
 /// - no envio, rejeitada: **todo código de 100 a 9999 que não é resultado do processamento (4.4.1) nem está em
@@ -72,7 +72,7 @@ pub fn estado_da_resposta(origem: Origem, cstat: &str) -> &'static str {
     match c {
         // 120: "Autorizado o uso da NF-e, com alerta" (NT 2026.002 v1.11, item 2.1: a nota é autorizada normalmente;
         // N-1 da R4).
-        "100" | "120" | "150" => return "autorizada",
+        _ if crate::nfe_xml::cstat_autorizado(c) => return "autorizada",
         "110" | "301" | "302" | "303" => return "denegada",
         "101" | "151" | "155" if origem == Origem::Consulta => return "cancelada",
         "217" if origem == Origem::Consulta => return "nao_recebida",
@@ -455,7 +455,8 @@ pub fn registrar_resposta(
         return desconhecida("resposta sem cStat");
     }
     let mut novo = estado_da_resposta(origem, cstat);
-    // N-1 da R4 (defesa): a rejeição não gera protocolo (NT 2026.002, PR09: 0-1, só na autorização e na denegação).
+    // N-1 da R4 (defesa): a rejeição não gera protocolo (MOC 7.0, Visão Geral, 4.3.5: o nProt identifica a autorização,
+    // a denegação, o cancelamento e a inutilização; C-2 da R5).
     // Uma resposta com protocolo nunca vira "rejeitada": um código novo de sucesso de uma NT futura fica sem resposta
     // (e a consulta decide), e o número não volta pelo descarte.
     if novo == "rejeitada" && !r.protocolo.trim().is_empty() {
@@ -490,7 +491,7 @@ pub fn registrar_resposta(
     let guarda_chave = matches!(novo, "autorizada" | "denegada" | "cancelada");
     tx.execute(
         "UPDATE nota_fiscal SET cstat = ?2, motivo = ?3,
-                                protocolo = CASE WHEN ?4 <> '' THEN ?4 ELSE protocolo END,
+                                protocolo = CASE WHEN ?7 AND ?4 <> '' THEN ?4 ELSE protocolo END,
                                 chave = CASE WHEN ?7 THEN CASE WHEN chave = '' THEN ?5 ELSE chave END ELSE '' END,
                                 xml_nome = CASE WHEN ?6 <> '' THEN ?6 ELSE xml_nome END
           WHERE id = ?1",
@@ -883,6 +884,12 @@ pub fn pode_falar_com_a_sefaz(conn: &Connection, id: &str, consulta: bool) -> Re
     // Cód-4 da R3: sem o CNPJ e a UF da loja, a resposta da SEFAZ não teria como ser conferida (K3): não sai.
     let cnpj = crate::documento::limpar(&crate::config::ler(conn, "loja_cnpj")?.unwrap_or_default());
     let uf = crate::config::ler(conn, "loja_uf")?.unwrap_or_default();
+    // C-7 da R5: a loja pode ter informado um CPF (a tela da loja aceita); a nota pede o CNPJ.
+    if cnpj.len() == 11 {
+        return Err(Erro::validacao(format!(
+            "A loja informou um CPF em Configurações › Loja. Para emitir nota fiscal pelo Rustinho, é preciso o CNPJ: {nada}."
+        )));
+    }
     if cnpj.len() != 14 || codigo_da_uf(&uf).is_none() {
         return Err(Erro::validacao(format!(
             "Falta informar o CNPJ e o estado (UF) da loja em Configurações › Loja: {nada}."
@@ -1322,6 +1329,12 @@ mod testes {
             assert!(e.contains("Configurações › Loja") && e.contains("nada foi enviado"), "{o_que}: {e}");
             assert_eq!((situacao(&b, &id), falso.enviadas.len()), ("rascunho".to_string(), 0), "{o_que}");
         }
+        // C-7 da R5: a loja com CPF recebe a mensagem certa.
+        let (mut b, u) = banco();
+        crate::config::gravar(&b.conn, "loja_cnpj", "123.456.789-09").unwrap();
+        let id = nova(&b, &u);
+        let e = transmitir(&mut b.conn, &u, &mut Falso::com(vec![ok("100")]), &id).unwrap_err().to_string();
+        assert!(e.contains("informou um CPF") && e.contains("CNPJ"), "{e}");
         // Se o CNPJ some depois do envio, a resposta ainda não é aceita sem conferir (K3).
         let (mut b, u) = banco();
         let id = nova(&b, &u);
@@ -1358,6 +1371,8 @@ mod testes {
         };
         assert_eq!(registrar_resposta(&b.conn, &u, &outra, Origem::Envio, Ok(&r)).unwrap(), "desconhecida");
         assert!(descartar(&b.conn, &u, &outra).is_err(), "o número não volta");
+        // C-6 da R5: a resposta que não é conclusiva não deixa o protocolo dela nesta nota.
+        assert_eq!(detalhe(&b.conn, &outra).unwrap().protocolo, "");
     }
 
     /// F3-3 da R3: a loja com CNPJ alfanumérico. A chave com letras nas posições do CNPJ confere (o dígito verificador
@@ -1552,7 +1567,9 @@ mod testes {
         let e = transmitir(&mut b.conn, &u, &mut falso, &id).unwrap_err().to_string();
         assert!(e.contains("desligado") && e.contains("nada foi enviado"), "{e}");
         assert_eq!((situacao(&b, &id), numero(&b, &id)), ("rascunho".to_string(), 0));
-        assert!(consultar(&mut b.conn, &u, &mut falso, &outra).is_err());
+        // C-4 da R5: na consulta, a mensagem diz que a consulta não foi feita (a nota já tinha saído).
+        let e = consultar(&mut b.conn, &u, &mut falso, &outra).unwrap_err().to_string();
+        assert!(e.contains("a consulta à SEFAZ não foi feita") && !e.contains("nada foi enviado"), "{e}");
         assert_eq!(situacao(&b, &outra), "desconhecida");
         assert!(falso.enviadas.is_empty() && falso.consultas == 0);
     }

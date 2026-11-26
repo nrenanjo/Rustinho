@@ -69,6 +69,8 @@ pub struct Candidato {
 }
 
 struct Nota {
+    /// C-8 da R5: denegada (o número foi gasto): conta só no piso da série.
+    denegada: bool,
     qr_versao: String,
     chave: String,
     cnpj: String,
@@ -122,7 +124,9 @@ fn ler_nota(xml: &str) -> Result<Nota, String> {
     let inf = descendente(raiz, "infNFe").ok_or("não é uma NF-e nem NFC-e")?;
     let cstat = descendente(raiz, "protNFe").and_then(|p| descendente(p, "cStat")).and_then(|n| n.text()).unwrap_or("");
     // N-1 da R4: 120 é "Autorizado o uso da NF-e, com alerta" (NT 2026.002): a nota vale, e o número dela conta no piso.
-    if !matches!(cstat.trim(), "100" | "120" | "150") {
+    // C-8 da R5: a denegada (110, 301, 302, 303) gasta o número: entra só no piso da numeração.
+    let denegada = matches!(cstat.trim(), "110" | "301" | "302" | "303");
+    if !crate::nfe_xml::cstat_autorizado(cstat) && !denegada {
         return Err("não está autorizada (sem protocolo de autorização)".into());
     }
     let ide = filho(inf, "ide").ok_or("sem o grupo ide")?;
@@ -131,6 +135,7 @@ fn ler_nota(xml: &str) -> Result<Nota, String> {
     let chave = inf.attribute("Id").unwrap_or("").trim_start_matches("NFe").to_string();
     let qr = descendente(raiz, "qrCode").and_then(|n| n.text()).unwrap_or("");
     Ok(Nota {
+        denegada,
         qr_versao: versao_do_qrcode(qr),
         chave,
         cnpj: texto_de(filho(emit, "CNPJ")),
@@ -191,13 +196,15 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
     for n in outras {
         d.ignorados.push(format!("{}: é de outro emitente ({})", n.chave, n.cnpj));
     }
-    d.lidas = da_loja.len() as i64;
-    d.cnpj = achado(&da_loja, |n| n.cnpj.as_str());
-    d.ie = achado(&da_loja, |n| n.ie.as_str());
-    d.uf = achado(&da_loja, |n| n.uf.as_str());
-    d.crt = achado(&da_loja, |n| n.crt.as_str());
-    d.identificador_csc = achado(&da_loja, |n| n.id_csc.as_str());
-    d.qr_versao_3 = da_loja.iter().any(|n| n.qr_versao == "3");
+    // C-8 da R5: os dados saem só das autorizadas; a denegada entra só no piso da série (o número dela foi gasto).
+    let autorizadas: Vec<&Nota> = da_loja.iter().copied().filter(|n| !n.denegada).collect();
+    d.lidas = autorizadas.len() as i64;
+    d.cnpj = achado(&autorizadas, |n| n.cnpj.as_str());
+    d.ie = achado(&autorizadas, |n| n.ie.as_str());
+    d.uf = achado(&autorizadas, |n| n.uf.as_str());
+    d.crt = achado(&autorizadas, |n| n.crt.as_str());
+    d.identificador_csc = achado(&autorizadas, |n| n.id_csc.as_str());
+    d.qr_versao_3 = autorizadas.iter().any(|n| n.qr_versao == "3");
     let mut series: BTreeMap<(i64, i64, i64), (i64, i64)> = BTreeMap::new();
     for n in &da_loja {
         let e = series.entry((n.ambiente, n.modelo, n.serie)).or_default();
@@ -422,6 +429,17 @@ mod testes {
             .unwrap();
         assert_eq!(registros, 2);
         assert!(!crate::sync::chave_da_loja("fiscal_serie_nfce"), "a série fica só neste computador");
+    }
+
+    /// C-8 da R5: a nota denegada gastou o número: entra no piso da série (o último número), mas não nos dados.
+    #[test]
+    fn r5_c8_denegada_entra_no_piso() {
+        let autorizada = nfce(41, 1, "000001", "1");
+        let denegada = nfce(45, 1, "000001", "3").replace("<cStat>100</cStat>", "<cStat>302</cStat>");
+        let d = descobrir_de_xml(&[("a.xml".into(), autorizada), ("b.xml".into(), denegada)], "11222333000181");
+        assert_eq!(d.lidas, 1, "a denegada não conta como lida");
+        assert_eq!(d.crt.unwrap().valor, "1", "os dados vêm só da autorizada");
+        assert_eq!(d.series[0].ultimo_numero, 45, "o número da denegada foi gasto");
     }
 
     /// N-1 da R4: a nota autorizada com alerta (cStat 120, NT 2026.002) conta como autorizada (e o número dela, no piso).

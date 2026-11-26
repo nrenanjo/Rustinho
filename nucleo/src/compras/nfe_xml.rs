@@ -45,7 +45,7 @@ pub struct NotaXml {
     pub destinatario: String,
     /// Nome, endereço e contato de quem recebeu (para cadastrar o cliente).
     pub destinatario_dados: Emitente,
-    /// O XML diz que a SEFAZ autorizou (cStat 100/150 no protocolo). Isto
+    /// O XML diz que a SEFAZ autorizou (cStat 100, 120 ou 150 no protocolo: `cstat_autorizado`). Isto
     /// sozinho não prova nada: o protocolo dos arquivos distribuídos não é
     /// assinado (PEND-15; até lá, conferência do gerente, D7).
     pub autorizada: bool,
@@ -189,6 +189,13 @@ fn dinheiro(no: Option<Node>, nome: &str) -> Result<i64, String> {
 
 /// Relê um XML **já guardado** (aceito na importação ou de antes do
 /// PEND-09). Não verifica a assinatura: nunca usar para dar entrada nova.
+/// O cStat do protocolo diz que a nota vale: 100 e 150 (MOC 7.0, Anexo I, 4.4.1) e 120, "Autorizado o uso da NF-e,
+/// com alerta" (NT 2026.002 v1.11, item 2.1). Uma definição só para o programa (C-1 da R5): a compra, a descoberta e a
+/// nota emitida usam esta.
+pub fn cstat_autorizado(cstat: &str) -> bool {
+    matches!(cstat.trim(), "100" | "120" | "150")
+}
+
 pub fn ler(xml: &str) -> Result<NotaXml, String> {
     ler_nota(xml, false)
 }
@@ -411,7 +418,7 @@ fn nota_do_no(raiz: Node, inf: Node, aceita_nfce: bool) -> Result<NotaXml, Strin
     let autorizada = descendente(raiz, "protNFe")
         .and_then(|p| descendente(p, "cStat"))
         .and_then(|n| n.text())
-        .map(|c| matches!(c.trim(), "100" | "150"))
+        .map(cstat_autorizado)
         .unwrap_or(false);
     let incoerencia = if autorizada { conferir_coerencia(raiz, inf, &chave) } else { String::new() };
     let protocolo = descendente(raiz, "protNFe")
@@ -580,6 +587,16 @@ pub const EXEMPLO: &str = include_str!("../../tests/nfe_exemplo.xml");
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// C-1 da R5: o XML de compra "autorizado com alerta" (cStat 120, NT 2026.002) é autorizado.
+    #[test]
+    fn r5_c1_xml_com_alerta_120_e_autorizado() {
+        let com_alerta = EXEMPLO.replace("<cStat>100</cStat>", "<cStat>120</cStat>");
+        assert!(com_alerta.contains("<cStat>120</cStat>"));
+        assert!(ler(&com_alerta).unwrap().autorizada);
+        let recusada = EXEMPLO.replace("<cStat>100</cStat>", "<cStat>225</cStat>");
+        assert!(!ler(&recusada).unwrap().autorizada);
+    }
 
     #[test]
     fn decimais() {

@@ -1,6 +1,6 @@
 {
- "versao": 5,
- "nota": "Regras de ST que vêm com o Rustinho (FIS-P5 e FIS-P6, 0.9.19, etapa 3): só UFs com a vigência confirmada na fonte oficial (matriz _reversa_sdd/auditoria_fiscal_0919/03v2_…). Quando a fonte não informa o início, a regra começa na data em que foi conferida valendo e fica com inicioInformado = false (a tela não mostra essa data como legal). Uma linha entra uma vez só (desdeVersao maior que a versão já aplicada neste computador) e nunca sobrescreve uma linha mudada na loja. Versão 2 (R1, 26/11/2026): inicioInformado em cada linha; as exceções da lista de cada UF no segmento 16 (PR, SC, PB, BA, RN, GO e RR) como linhas \"sem ST\" de CEST mais longo; versaoDaLinha corrige a linha do programa que a loja não mudou. Versão 3 (R2, 26/11/2026): PB e RN também deixam de fora os itens de bicicleta (16.005.00, 16.007.01 e 16.009.00). Versão 4 (R3, 26/11/2026): RS (Item V, exceto pneus e câmaras de bicicleta) e ES (art. 265, § 6º, III) sem os itens de bicicleta; RS também sem o recauchutado e o protetor de bicicleta (fora da lista); citação do RN (art. 14, § 7º); aviso de lista por item não conferida em ES, PE e MS. Versão 5 (R4, 26/11/2026): o PR lista só parte das autopeças (art. 28, 69 posições): 16 prefixos \"sem ST\" para os 61 CEST fora da lista; aviso \"não conferimos peça por peça\" nas autopeças de BA, PE, MS e MT e nos pneus de ES, PE e MS.",
+ "versao": 6,
+ "nota": "Regras de ST que vêm com o Rustinho (FIS-P5 e FIS-P6, 0.9.19, etapa 3): só UFs com a vigência confirmada na fonte oficial (matriz _reversa_sdd/auditoria_fiscal_0919/03v2_…). Quando a fonte não informa o início, a regra começa na data em que foi conferida valendo e fica com inicioInformado = false (a tela não mostra essa data como legal). Uma linha entra uma vez só (desdeVersao maior que a versão já aplicada neste computador) e nunca sobrescreve uma linha mudada na loja. Versão 2 (R1, 26/11/2026): inicioInformado em cada linha; as exceções da lista de cada UF no segmento 16 (PR, SC, PB, BA, RN, GO e RR) como linhas \"sem ST\" de CEST mais longo; versaoDaLinha corrige a linha do programa que a loja não mudou. Versão 3 (R2, 26/11/2026): PB e RN também deixam de fora os itens de bicicleta (16.005.00, 16.007.01 e 16.009.00). Versão 4 (R3, 26/11/2026): RS (Item V, exceto pneus e câmaras de bicicleta) e ES (art. 265, § 6º, III) sem os itens de bicicleta; RS também sem o recauchutado e o protetor de bicicleta (fora da lista); citação do RN (art. 14, § 7º); aviso de lista por item não conferida em ES, PE e MS. Versão 5 (R4, 26/11/2026): o PR lista só parte das autopeças (art. 28, 69 posições): 16 prefixos \"sem ST\" para os 61 CEST fora da lista; aviso \"não conferimos peça por peça\" nas autopeças de BA, PE, MS e MT e nos pneus de ES, PE e MS. Versão 6 (R5, 26/11/2026): as 16 linhas \"sem ST\" do PR da versão 5 saem. A tabela do art. 28 guardada tem 69 posições, mas o § 5º, II, atual cita a \"posição 125\", e o Prot. ICMS 97/2010 (o PR é signatário; cl. 5ª: também nas operações internas) tem 125 itens na mesma ordem: a página guardada está, provavelmente, incompleta. O PR volta ao segmento 01 inteiro com ST, com o aviso \"não conferimos peça por peça\", até a tabela inteira ser lida na fonte oficial.",
  "regras": [
   {
    "id": "rs-autopecas-sem-st",
@@ -204,13 +204,13 @@
    "vigenteDe": "2026-11-26",
    "vigenteAte": null,
    "comSt": true,
-   "descricao": "Autopeças com ST",
+   "descricao": "Autopeças com ST — Esta regra vale para o grupo todo; não conferimos peça por peça. Confirme com o contador.",
    "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
    "dispositivo": "Anexo IX, Cap. I, Seção V, art. 28",
    "consultadaEm": "2026-11-26",
    "desdeVersao": 1,
    "inicioInformado": false,
-   "versaoDaLinha": 2
+   "versaoDaLinha": 6
   },
   {
    "id": "pr-pneus-com-st",
@@ -841,246 +841,72 @@
    "desdeVersao": 4,
    "inicioInformado": false,
    "versaoDaLinha": 4
-  },
+  }
+ ],
+ "retiradas": [
   {
    "id": "pr-autopecas-01019-sem-st",
-   "uf": "PR",
-   "cestInicio": "01019",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01019): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-01058-sem-st",
-   "uf": "PR",
-   "cestInicio": "01058",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01058): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-0106201-sem-st",
-   "uf": "PR",
-   "cestInicio": "0106201",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 0106201): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-01071-sem-st",
-   "uf": "PR",
-   "cestInicio": "01071",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01071): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-01072-sem-st",
-   "uf": "PR",
-   "cestInicio": "01072",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01072): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-01073-sem-st",
-   "uf": "PR",
-   "cestInicio": "01073",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01073): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-01074-sem-st",
-   "uf": "PR",
-   "cestInicio": "01074",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01074): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-01075-sem-st",
-   "uf": "PR",
-   "cestInicio": "01075",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01075): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-01076-sem-st",
-   "uf": "PR",
-   "cestInicio": "01076",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01076): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-01077-sem-st",
-   "uf": "PR",
-   "cestInicio": "01077",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01077): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-01078-sem-st",
-   "uf": "PR",
-   "cestInicio": "01078",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01078): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-01079-sem-st",
-   "uf": "PR",
-   "cestInicio": "01079",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 01079): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-0108-sem-st",
-   "uf": "PR",
-   "cestInicio": "0108",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 0108): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-0109-sem-st",
-   "uf": "PR",
-   "cestInicio": "0109",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 0109): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-011-sem-st",
-   "uf": "PR",
-   "cestInicio": "011",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 011): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   },
   {
    "id": "pr-autopecas-019-sem-st",
-   "uf": "PR",
-   "cestInicio": "019",
-   "vigenteDe": "2026-11-26",
-   "vigenteAte": null,
-   "comSt": false,
-   "descricao": "Autopeças fora da lista do PR (CEST começando por 019): sem ST",
-   "fonte": "RICMS/PR compilado até 05/10/2026 (legislacaotributaria.pr.gov.br)",
-   "dispositivo": "Anexo IX, art. 28: a tabela do caput (redação vigente, 69 posições) traz só os CEST 01.001.00 a 01.070.00, menos o 01.019.00 e o 01.062.01",
-   "consultadaEm": "2026-11-26",
-   "desdeVersao": 5,
-   "inicioInformado": false,
-   "versaoDaLinha": 5
+   "naVersao": 6
   }
  ]
 }

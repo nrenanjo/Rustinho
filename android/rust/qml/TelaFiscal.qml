@@ -425,7 +425,7 @@ FocusScope {
                         color: Tema.pergaminho
                         Layout.fillWidth: true
                         Nota {
-                            text: "Na NFC-e do balcão a SEFAZ recusa estas peças (rejeição 383), e na NF-e para quem não é contribuinte do ICMS (uma pessoa ou empresa sem inscrição estadual) também "
+                            text: "Na NFC-e do balcão a SEFAZ recusa estas peças (rejeição 383), e na NF-e para quem não é contribuinte do ICMS, como quem compra para uso próprio, também "
                                   + "(rejeição 600). Se a loja é substituta e vende para outras empresas, elas podem estar certas: "
                                   + "confirme com o contador."
                             font.pixelSize: 14

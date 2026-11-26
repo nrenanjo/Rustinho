@@ -121,7 +121,7 @@ pub fn tributacao(conn: &Connection, uf: &str, cest: &str, csosn_peca: &str, dat
         // F2-4 da R1 (MOC 7.0, Anexo I: N12a-20, rejeição 383; N12a-40 e N12a-44; N12a-70): o substituto só existe na
         // NF-e para contribuinte; na NFC-e e na NF-e para não contribuinte (indIEDest = 9) a SEFAZ recusa.
         ("201" | "202" | "203", _) => format!(
-            "CSOSN {csosn} (a loja cobra a ST) só vale na NF-e para empresa contribuinte. Na NFC-e do balcão a SEFAZ recusa (rejeição 383) e na NF-e para não contribuinte do ICMS também (rejeição 600). Confirme com o contador."
+            "CSOSN {csosn} (a loja cobra a ST) só vale na NF-e para empresa contribuinte. Na NFC-e do balcão a SEFAZ recusa (rejeição 383) e na NF-e para quem não é contribuinte do ICMS, como quem compra para uso próprio, também (rejeição 600). Confirme com o contador."
         ),
         ("500", Some(false)) => format!(
             "Esta peça está com CSOSN 500, mas pela regra de {uf} ela não tem mais ST nesta data. O certo deve ser 102 (CFOP 5102). Confirme com o contador."
@@ -683,6 +683,17 @@ pub fn excluir_regra(conn: &Connection, dispositivo: &str, usuario_id: &str, id:
 struct Catalogo {
     versao: i64,
     regras: Vec<RegraDoPrograma>,
+    /// N-1 da R5: linhas do programa que saíram do catálogo numa versão. Num banco que ainda não aplicou essa versão,
+    /// a linha sai se continua do programa (a que a loja mudou fica).
+    #[serde(default)]
+    retiradas: Vec<Retirada>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Retirada {
+    id: String,
+    na_versao: i64,
 }
 
 #[derive(Deserialize)]
@@ -798,6 +809,12 @@ pub fn carregar_regras_do_programa(tx: &Connection) -> Resultado<usize> {
             if n > 0 {
                 corrigidas.push(format!("{} CEST {}: {}", r.uf, r.cest_inicio, r.descricao));
             }
+        }
+    }
+    for r in catalogo.retiradas.iter().filter(|r| r.na_versao > aplicada) {
+        let n = tx.execute("DELETE FROM regra_st WHERE id = ?1 AND origem = 'rustinho'", [&r.id])?;
+        if n > 0 {
+            corrigidas.push(format!("Regra do programa retirada: {}", r.id));
         }
     }
     if !corrigidas.is_empty() {
@@ -1381,7 +1398,7 @@ mod testes {
     fn fis_p6_o_catalogo_do_programa_entra_uma_vez_e_respeita_a_loja() {
         let b = Banco::em_memoria().unwrap();
         let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
-        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("5"));
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("6"));
         assert_eq!(carregar_regras_do_programa(&b.conn).unwrap(), 0, "a mesma versão não aplica de novo");
         // A regra que saiu deste banco (por exemplo, a exclusão que veio de outro caixa) não volta na mesma versão.
         b.conn.execute("DELETE FROM regra_st WHERE id = 'ba-pneus-com-st'", []).unwrap();
@@ -1458,16 +1475,20 @@ mod testes {
             assert!(achar(&lista, id).descricao.contains("não conferimos peça por peça"), "{id}");
         }
         assert!(achar(&lista, "rn-pneus-16005-sem-st").dispositivo.contains("art. 14, § 7º"));
-        // N-2 da R4: o PR lista só parte das autopeças (art. 28, 69 posições: 01.001.00 a 01.070.00, menos o 01.019.00
-        // e o 01.062.01). Fora da lista, sem ST.
+        // N-1 da R5: a tabela do PR guardada está, provavelmente, incompleta (o § 5º cita a posição 125; o Prot. ICMS
+        // 97/2010 tem 125 itens): o PR fica com o segmento 01 inteiro com ST e o aviso, até a tabela inteira ser lida.
         let pr = |cest: &str| st("PR", cest);
-        for cest in ["01.001.00", "01.062.00", "01.070.00"] {
+        for cest in ["01.001.00", "01.058.00", "01.070.00", "01.099.00", "01.999.00"] {
             assert_eq!(pr(cest), Some(true), "PR {cest}");
         }
-        for cest in ["01.019.00", "01.062.01", "01.071.00", "01.099.00", "01.108.00", "01.999.00"] {
-            assert_eq!(pr(cest), Some(false), "PR {cest}");
-        }
-        for id in ["ba-autopecas-com-st", "pe-autopecas-com-st", "ms-autopecas-com-st", "mt-autopecas-com-st"] {
+        assert!(!lista.iter().any(|r| r.id.starts_with("pr-autopecas-") && r.id.ends_with("-sem-st")));
+        for id in [
+            "pr-autopecas-com-st",
+            "ba-autopecas-com-st",
+            "pe-autopecas-com-st",
+            "ms-autopecas-com-st",
+            "mt-autopecas-com-st",
+        ] {
             assert!(achar(&lista, id).descricao.contains("não conferimos peça por peça"), "{id}");
         }
         assert_eq!(st("RR", "16.007.01"), Some(true), "RR: protetor de bicicleta continua");
@@ -1548,6 +1569,32 @@ mod testes {
         assert_eq!(crate::sync::sem_registrar(&b.conn, carregar_regras_do_programa).unwrap(), 0);
     }
 
+    /// N-1 da R5: a linha do programa retirada numa versão sai do banco que aplicou a versão anterior; a que a loja mudou
+    /// fica.
+    #[test]
+    fn r5_n1_linha_retirada_do_catalogo_sai_do_banco() {
+        let b = Banco::em_memoria().unwrap();
+        for (id, origem) in [("pr-autopecas-0108-sem-st", "rustinho"), ("pr-autopecas-0109-sem-st", "loja")] {
+            b.conn
+                .execute(
+                    "INSERT INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, origem)
+                     VALUES (?1, 'PR', substr(?1, 14, 4), '2026-11-26', NULL, 0, 'x', ?2)",
+                    params![id, origem],
+                )
+                .unwrap();
+        }
+        config::gravar(&b.conn, CHAVE_CATALOGO, "5").unwrap();
+        crate::sync::sem_registrar(&b.conn, carregar_regras_do_programa).unwrap();
+        let lista = regras(&b.conn).unwrap();
+        assert!(!lista.iter().any(|r| r.id == "pr-autopecas-0108-sem-st"), "a do programa saiu");
+        assert!(lista.iter().any(|r| r.id == "pr-autopecas-0109-sem-st"), "a da loja ficou");
+        let registro: String = b
+            .conn
+            .query_row("SELECT detalhes FROM auditoria WHERE acao = 'fiscal.catalogo'", [], |l| l.get(0))
+            .unwrap();
+        assert!(registro.contains("retirada: pr-autopecas-0108-sem-st"), "{registro}");
+    }
+
     /// B3 da R1: a regra que já terminou não volta a valer (estender o fim reabriria dias que já passaram); a que está
     /// valendo pode ter o fim mudado para depois de ontem.
     #[test]
@@ -1609,7 +1656,7 @@ mod testes {
         b.conn.execute_batch("DROP TRIGGER t_b6;").unwrap();
         drop(b);
         let b = Banco::abrir(&caminho).unwrap();
-        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("5"), "a próxima abertura aplica");
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("6"), "a próxima abertura aplica");
         assert!(regras(&b.conn).unwrap().iter().any(|r| r.id == "go-pneus-com-st"));
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
@@ -1681,7 +1728,7 @@ mod testes {
     fn fis_p6_as_regras_do_programa_tem_fonte() {
         let b = Banco::em_memoria().unwrap();
         let lista = regras(&b.conn).unwrap();
-        assert_eq!(lista.len(), 76, "4 de SP (0002/0032) e 72 do catálogo, versão 5");
+        assert_eq!(lista.len(), 60, "4 de SP (0002/0032) e 56 do catálogo, versão 6");
         for r in &lista {
             assert_eq!(r.origem, "rustinho", "{}", r.id);
             assert!(!r.fonte.is_empty() && !r.dispositivo.is_empty() && !r.consultada_em.is_empty(), "{}", r.id);
@@ -1723,7 +1770,7 @@ mod testes {
         let lista = regras(&b.conn).unwrap();
         assert_eq!(achar(&lista, &id).origem, "loja");
         assert!(achar(&lista, &id).inicio_informado, "a regra da loja tem o início que o gerente digitou");
-        assert_eq!(lista.len(), 77);
+        assert_eq!(lista.len(), 61);
 
         assert_eq!(ler_data("1/10/26").unwrap().unwrap(), "2026-10-01");
         assert!(ler_data("31/02/2026").is_err());
