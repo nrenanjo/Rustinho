@@ -690,8 +690,13 @@ def s7_sessao_acaba_no_destino(placar, fotos):
             esperou = time.time()
             assentou7 = r.esperar(lambda: rr.guia_assentada(r.textos()), 30)
             print(f"MEDIDA s7: a guia assentada {time.time() - esperou:.1f} s depois de aparecer ({assentou7})", flush=True)
+            # B-4 da R11: a espera é conferida (uma guia que não assenta em 30 s, ou uma tela que não para, reprova).
+            if not ok("s7: a guia assenta (destaque ativo, nada se movendo) em até 30 s", assentou7, r.foto("-1b")):
+                return
             r.rolar_ate("Aceitar como está")
-            r.esperar(lambda: "TESTE_MOVIMENTO_ATIVO:0" in {t for _, _, t in r.textos()}, 15)
+            parou = r.esperar(lambda: "TESTE_MOVIMENTO_ATIVO:0" in {t for _, _, t in r.textos()}, 15)
+            if not ok("s7: depois de rolar, a tela para em até 15 s", parou, r.foto("-1c")):
+                return
             rr.topo(r, "Aceitar como está")
             if not ok("s7: a pergunta do aceite abre", r.esperar(lambda: r.tem("Aceitar como está?")), r.foto("-2")):
                 return

@@ -37,6 +37,10 @@ TELA = base.TELA
 TITULO = "Escolha a pasta com os XML das notas que a loja já emitiu"
 LOJA = "11222333000181"
 FORNECEDOR = "99888777000166"
+# A frase junto do botão "Ler as notas da loja" (EmissaoFiscal.qml; B-6 da R9, B-7 da R10 e da R11).
+FRASE_DO_BOTAO = ("O Rustinho pode ler os arquivos XML das notas que a loja já emitiu pelo sistema de hoje, conferir o CNPJ "
+                  "e trazer daí o regime, a série, o último número e o identificador do CSC. Nada é gravado sem você "
+                  "confirmar.")
 ALFA = "12ABC34501DE35"
 
 
@@ -203,6 +207,31 @@ def main():
                                    tem=["último número 44 · só notas denegadas (o número delas foi gasto)",
                                         "a próxima nota do Rustinho sai depois da 44"],
                                    nao_tem=["Qual destes CNPJ é o da loja?", FORNECEDOR])
+        finally:
+            r.fechar()
+        # B-3 da R11: o singular com a pergunta ("1 nota autorizada lida, de 2 emitentes"), o "1 arquivo deixado de lado"
+        # e a frase junto do botão, cada um pelo texto inteiro (igual=), para uma reversão reprovar.
+        for nome in os.listdir(notas):
+            os.remove(os.path.join(notas, nome))
+        for nome, conteudo in [("loja-50.xml", nfce(LOJA, 50, 1)), ("compra-10.xml", denegada(FORNECEDOR, 10)),
+                               ("lixo.xml", "<isto nao e xml")]:
+            with open(os.path.join(notas, nome), "w", encoding="utf-8") as f:
+                f.write(conteudo)
+        imp.por_fora(pasta, "DELETE FROM config WHERE chave = 'loja_cnpj';")
+        r = nav.Rustinho(pasta, "TelaConfiguracoes", {"secao": "fiscal"}, fotos, "fis-descoberta-singular", casa)
+        try:
+            r.entrar("Ana")
+            time.sleep(3)
+            tudo_certo &= conferir("B-7 (R11): a frase junto do botão diz o que a leitura faz", r.foto("-7-frase"),
+                                   r.textos(), igual=[FRASE_DO_BOTAO])
+            abrir_descoberta(r)
+            if not r.esperar("Qual destes CNPJ é o da loja?", 20):
+                raise RuntimeError(f"a descoberta do singular não perguntou (foto {r.foto('-instr10')})")
+            tudo_certo &= conferir("B-2 (R10) e B-6 (R11): o singular e o motivo dos arquivos de lado",
+                                   r.foto("-8-singular"), r.textos(),
+                                   igual=["1 nota autorizada lida, de 2 emitentes · 1 arquivo deixado de lado (não "
+                                          "autorizado, de outro emitente, de CPF ou sem leitura). Nada é gravado sem você "
+                                          "confirmar."])
         finally:
             r.fechar()
     finally:

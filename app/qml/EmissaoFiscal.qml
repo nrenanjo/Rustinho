@@ -183,8 +183,9 @@ ColumnLayout {
         // deixou de dizer.
         Nota {
             // B-7 da R10: diz quais dados.
-            text: "O Rustinho pode ler os arquivos XML das notas que a loja já emitiu pelo sistema de hoje e trazer daí "
-                  + "o CNPJ, o regime, a série e o último número. Nada é gravado sem você confirmar."
+            // B-7 da R11: o que se pode usar (o CNPJ só é conferido com o da loja).
+            text: "O Rustinho pode ler os arquivos XML das notas que a loja já emitiu pelo sistema de hoje, conferir o CNPJ "
+                  + "e trazer daí o regime, a série, o último número e o identificador do CSC. Nada é gravado sem você confirmar."
             font.pixelSize: 14
             Layout.fillWidth: true
         }
@@ -239,8 +240,9 @@ ColumnLayout {
                                    : painelDescoberta.somaAutorizadas + " notas autorizadas lidas, de ")
                                   + painelDescoberta.d.candidatos.length + " emitentes")
                              : (painelDescoberta.d.lidas === 1 ? "1 nota autorizada lida" : painelDescoberta.d.lidas + " notas autorizadas lidas"))
-                          + (painelDescoberta.d.ignorados.length === 1 ? " · 1 arquivo deixado de lado (não autorizado, de outro emitente ou sem leitura)"
-                             : painelDescoberta.d.ignorados.length ? " · " + painelDescoberta.d.ignorados.length + " arquivos deixados de lado (não autorizados, de outro emitente ou sem leitura)" : "")
+                          // B-6 da R11: o motivo da nota de CPF também.
+                          + (painelDescoberta.d.ignorados.length === 1 ? " · 1 arquivo deixado de lado (não autorizado, de outro emitente, de CPF ou sem leitura)"
+                             : painelDescoberta.d.ignorados.length ? " · " + painelDescoberta.d.ignorados.length + " arquivos deixados de lado (não autorizados, de outro emitente, de CPF ou sem leitura)" : "")
                           + ". Nada é gravado sem você confirmar."
                     font.pixelSize: 14
                     Layout.fillWidth: true

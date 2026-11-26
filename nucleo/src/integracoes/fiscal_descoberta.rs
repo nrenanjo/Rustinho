@@ -181,7 +181,11 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
             // candidato com o CNPJ vazio ("É o da loja" com o CNPJ vazio lia de novo sem escolha: a pergunta voltava,
             // num laço).
             Ok(n) if crate::documento::limpar(&n.cnpj).is_empty() => {
-                d.ignorados.push(format!("{nome}: sem o CNPJ do emitente (a loja emite com CNPJ)"))
+                // B-1 da R11: o Rustinho só emite com o CNPJ da loja (a loja com CPF é recusada antes da SEFAZ,
+                // `nota_fiscal::pode_falar_com_a_sefaz`): a nota de CPF fica de lado, com o motivo exato.
+                d.ignorados.push(format!(
+                    "{nome}: sem o CNPJ do emitente (nota de CPF; o Rustinho emite só com o CNPJ da loja)"
+                ))
             }
             Ok(n) => notas.push(n),
             Err(m) => d.ignorados.push(format!("{nome}: {m}")),
@@ -525,6 +529,22 @@ mod testes {
         );
         assert_eq!(d.ignorados.len(), 1);
         assert!(d.ignorados[0].contains("sem o CNPJ do emitente"), "{:?}", d.ignorados);
+    }
+
+    /// B-2 da R11: com o CNPJ da loja informado, a nota de CPF fica de lado sem mudar os dados da loja (lidas, séries).
+    #[test]
+    fn t032_b2_com_cnpj_informado_a_nota_de_cpf_fica_de_lado() {
+        let com_cpf = nfce(9, 1, "000001", "1").replace("<CNPJ>11222333000181</CNPJ>", "<CPF>12345678909</CPF>");
+        let d = descobrir_de_xml(
+            &[("a.xml".into(), nfce(41, 1, "000001", "1")), ("b.xml".into(), com_cpf)],
+            "11.222.333/0001-81",
+        );
+        assert_eq!(d.lidas, 1);
+        assert_eq!(d.series, vec![Serie { ambiente: 1, modelo: 65, serie: 1, ultimo_numero: 41, notas: 1 }]);
+        assert_eq!(
+            d.ignorados,
+            vec!["b.xml: sem o CNPJ do emitente (nota de CPF; o Rustinho emite só com o CNPJ da loja)"]
+        );
     }
 
     /// B-4 da R10 (EA): um emitente só, com autorizadas e denegadas, sem o CNPJ da loja: ele é a loja, sem perguntar; o
