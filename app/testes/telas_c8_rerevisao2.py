@@ -167,7 +167,14 @@ def s1_cadeias_seguidas(placar, fotos):
                 chegou = r.esperar(lambda: r.tem(TITULO_7) and r.pilha() == base + 1, 10)
                 if chegou:
                     r.esperar(lambda: any(60 <= y < r.altura() - 30 for _, y in r.onde("Aceitar como está")), 4)
-                time.sleep(0.8)
+                    # T037 da 005 (CI 45897908596, Qt 6.8.3): a foto saía 0,8 s depois da chegada, e o destaque ainda não
+                    # tinha chegado (razões 1,0; a s7 da mesma CI mediu a guia assentada 8,2 s depois de aparecer). Agora
+                    # a foto espera o que o programa diz (o destaque assentado, nada se movendo), até 30 s, conferido.
+                    esperou = time.time()
+                    assentou1 = r.esperar(lambda: rr.guia_assentada(r.textos()), 30)
+                    print(f"MEDIDA s1 (ida {ida}): a guia assentada {time.time() - esperou:.1f} s depois de chegar "
+                          f"({assentou1})", flush=True)
+                    ok(f"s1 (ida {ida}): a guia assenta (destaque ativo, nada se movendo) em até 30 s", assentou1)
                 f = r.foto(f"-ida{ida}")
                 ok(f"s1 (ida {ida}): Ver o registro leva a Caixas com a guia", chegou, f)
                 setas = r.setas()

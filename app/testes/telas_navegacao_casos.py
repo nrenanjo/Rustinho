@@ -173,8 +173,10 @@ class Rustinho(base.Rustinho):
             if self.p.poll() is not None:
                 with open(self.saida, errors="replace") as fh:
                     motivo = " | ".join(ln.strip() for ln in fh.readlines()[:3])
+                vivo = subprocess.run(["xdpyinfo", "-display", TELA], capture_output=True).returncode == 0
                 raise RuntimeError(f"INSTRUMENTAÇÃO: o Rustinho saiu antes de abrir a janela (código {self.p.returncode}: "
-                                   f"{motivo}) (veja {self.saida})")
+                                   f"{motivo}; a tela virtual {TELA} {'responde' if vivo else 'NÃO responde'}) "
+                                   f"(veja {self.saida})")
             s = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(self.p.pid)],
                                env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
             for j in s.stdout.split():

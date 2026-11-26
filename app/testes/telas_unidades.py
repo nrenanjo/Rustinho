@@ -147,7 +147,14 @@ class Rustinho(tema.Rustinho):
         fim = comeco + 60.0
         while True:
             if self.p.poll() is not None:
-                raise RuntimeError(f"o Rustinho fechou antes de abrir a janela (veja {self.saida})")
+                # T037 da 005 (CI 45897908596 e 45881659968): o programa dizia "could not connect to display" no meio de
+                # uma unidade. O erro diz também se a tela virtual ainda responde, para separar "o Xvfb morreu" de "o
+                # Xvfb recusou a conexão" na próxima vez.
+                vivo = subprocess.run(["xdpyinfo", "-display", TELA], capture_output=True).returncode == 0
+                with open(self.saida, errors="replace") as fh:
+                    motivo = " | ".join(ln.strip() for ln in fh.readlines()[:2])
+                raise RuntimeError(f"o Rustinho fechou antes de abrir a janela (código {self.p.returncode}: {motivo}; "
+                                   f"a tela virtual {TELA} {'responde' if vivo else 'NÃO responde'}) (veja {self.saida})")
             s = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "rustinho"],
                                env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
             if s.stdout.split():

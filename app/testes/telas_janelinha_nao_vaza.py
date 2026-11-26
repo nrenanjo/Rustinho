@@ -4,13 +4,15 @@ tela de trás (no toque do celular, nem antes vazava).
 
 Caso real: Estoque › Encomendas com três encomendas; "Nova encomenda"; no campo Cliente, a busca lista os clientes
 (linhas com TapHandler) por cima da lista de encomendas (linhas com TapHandler que escolhem a encomenda e mostram os
-botões dela, como "Cancelar encomenda"). Antes da T035, o toque no cliente também escolhia a encomenda que estava atrás.
+botões dela, como "Cancelar encomenda"). Antes da T035, o clique no cliente também escolhia a encomenda que estava atrás.
 
 Conferências:
-- CONTROLE (a sobreposição existe): a linha do cliente fica na mesma altura de uma linha de encomenda atrás; sem isso,
-  o roteiro reprova como "não medido" (ele não pode passar sem provar nada; B-1 da R13);
-- o toque no cliente escolhe o cliente (a janelinha mostra o nome dele no campo);
-- a escolha da lista de trás não muda (os "Cancelar encomenda" ficam onde estavam).
+- CONTROLE do sensor (B-4 da R14): com a "Pastilha dianteira" escolhida antes, o sensor ("Cancelar encomenda", lido com o
+  mouse fora da janela) vê exatamente a linha dela; um sensor cego reprova;
+- CONTROLE da sobreposição: a linha do cliente fica na altura (e no x) de uma linha de encomenda atrás, que não é a
+  Pastilha; sem isso, o roteiro reprova como "não medido" (ele não pode passar sem provar nada; B-1 da R13);
+- o clique no cliente escolhe o cliente (a linha da lista some; o nome vai para o campo);
+- a escolha da lista de trás não muda (os "Cancelar encomenda" continuam na Pastilha).
 
     python3 app/testes/telas_janelinha_nao_vaza.py [pasta das fotos]
 """
@@ -114,7 +116,7 @@ def caso(placar, fotos):
             time.sleep(1.2)
             f = r.foto("-4")
             # escolherCliente põe o nome no campo e esvazia a lista (a linha "Zé da Oficina  ·  …" some).
-            ok("o toque escolhe o cliente (a linha da lista some; o nome vai para o campo)",
+            ok("o clique escolhe o cliente (a linha da lista some; o nome vai para o campo)",
                not any(abs(y - cliente[1]) < 6 for _, y in linha_do_cliente(r, "Zé da Oficina")), f)
             depois = escolhidos(r)
             print(f"MEDIDA: \"Cancelar encomenda\" antes {antes}, depois {depois}", flush=True)
