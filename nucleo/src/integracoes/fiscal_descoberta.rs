@@ -80,6 +80,8 @@ struct Nota {
     qr_versao: String,
     chave: String,
     cnpj: String,
+    /// B-3 da R12: o emitente tem CPF (e não CNPJ): o motivo exato quando a nota fica de lado.
+    com_cpf: bool,
     ie: String,
     uf: String,
     crt: String,
@@ -145,6 +147,7 @@ fn ler_nota(xml: &str) -> Result<Nota, String> {
         qr_versao: versao_do_qrcode(qr),
         chave,
         cnpj: texto_de(filho(emit, "CNPJ")),
+        com_cpf: !crate::documento::limpar(&texto_de(filho(emit, "CPF"))).is_empty(),
         ie: texto_de(filho(emit, "IE")),
         uf: texto_de(filho(emit, "enderEmit").and_then(|e| filho(e, "UF"))),
         crt: texto_de(filho(emit, "CRT")),
@@ -183,9 +186,12 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
             Ok(n) if crate::documento::limpar(&n.cnpj).is_empty() => {
                 // B-1 da R11: o Rustinho só emite com o CNPJ da loja (a loja com CPF é recusada antes da SEFAZ,
                 // `nota_fiscal::pode_falar_com_a_sefaz`): a nota de CPF fica de lado, com o motivo exato.
-                d.ignorados.push(format!(
-                    "{nome}: sem o CNPJ do emitente (nota de CPF; o Rustinho emite só com o CNPJ da loja)"
-                ))
+                d.ignorados.push(if n.com_cpf {
+                    format!("{nome}: sem o CNPJ do emitente (nota de CPF; o Rustinho emite só com o CNPJ da loja)")
+                } else {
+                    // B-3 da R12: sem CNPJ nem CPF no emitente, não se afirma "nota de CPF".
+                    format!("{nome}: sem o CNPJ do emitente (o Rustinho emite só com o CNPJ da loja)")
+                })
             }
             Ok(n) => notas.push(n),
             Err(m) => d.ignorados.push(format!("{nome}: {m}")),
@@ -545,6 +551,14 @@ mod testes {
             d.ignorados,
             vec!["b.xml: sem o CNPJ do emitente (nota de CPF; o Rustinho emite só com o CNPJ da loja)"]
         );
+    }
+
+    /// B-3 da R12: o emitente sem CNPJ e sem CPF fica de lado sem ser chamado de "nota de CPF".
+    #[test]
+    fn t033_b3_emitente_sem_cnpj_nem_cpf_nao_e_nota_de_cpf() {
+        let vazio = nfce(9, 1, "000001", "1").replace("<CNPJ>11222333000181</CNPJ>", "<CNPJ></CNPJ>");
+        let d = descobrir_de_xml(&[("a.xml".into(), nfce(41, 1, "000001", "1")), ("b.xml".into(), vazio)], "");
+        assert_eq!(d.ignorados, vec!["b.xml: sem o CNPJ do emitente (o Rustinho emite só com o CNPJ da loja)"]);
     }
 
     /// B-4 da R10 (EA): um emitente só, com autorizadas e denegadas, sem o CNPJ da loja: ele é a loja, sem perguntar; o

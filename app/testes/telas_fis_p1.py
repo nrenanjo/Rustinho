@@ -29,10 +29,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from telas_d09 import TELA, Rustinho, conferir, montar_loja, xdo  # noqa: E402
 from telas_fis_p5 import clicar_rolando, rolar_ate, tecla  # noqa: E402
 
-# A área de texto de um campo fica à direita do botão Colar (que ocupa a borda esquerda): o clique "no campo" é feito a
-# esta distância do começo do rótulo, e não na altura do começo dele (T032).
-DENTRO_DO_CAMPO = 120
-
 
 def semear_notas(pasta):
     c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
@@ -124,10 +120,7 @@ def main():
             botoes = [(x, y) for x, y, t in alvos if t == "Trocar"]
             if not campo or not botoes:
                 raise RuntimeError(f"não achei o campo da confirmação ou o botão Trocar (veja {r.saida})")
-            # T032 (telas da T032): o clique na altura do começo do rótulo caía no botão Colar da borda esquerda do campo
-            # (a dica "Colar" aparecia e, às vezes, tomava o Esc que devia fechar a janela). Agora o clique cai na área de
-            # texto, DENTRO_DO_CAMPO px à direita do começo do rótulo; a K12 (o controle) usa o mesmo deslocamento.
-            xdo("mousemove", str(campo[-1][0] + DENTRO_DO_CAMPO), str(campo[-1][1] + 34), "click", "1")
+            xdo("mousemove", str(campo[-1][0]), str(campo[-1][1] + 34), "click", "1")
             time.sleep(0.5)
             xdo("type", "--delay", "40", "zqxwvk")
             time.sleep(1)
@@ -135,17 +128,26 @@ def main():
                                    tem=["Ainda não dá para trocar"], nao_tem=["zqxwvk"])
             xdo("mousemove", str(botoes[-1][0]), str(botoes[-1][1]), "click", "1")
             time.sleep(1.5)
-            # O Esc fecha a janela; se houver uma dica aberta, o primeiro Esc fecha a dica (o comportamento do Qt). O que
-            # conta é a tela: a janela fechada, conferida pelo título dela, em até 3 Esc; senão, reprova.
-            fechou = False
+            # T033 (M-1 da R12): o clique no "Trocar" desligado não atravessa a janelinha: nada abre por baixo (antes,
+            # com uma linha de nota atrás do botão, abria o detalhe dela, invisível, e o Esc seguinte o fechava).
+            tudo_certo &= conferir("FIS-P3: o clique no Trocar desligado não abre nada por baixo", r.foto("-5bb"),
+                                   r.textos(), nao_tem=["Semeada pelo teste"])
+            # T033 (M-1 da R12): UM Esc fecha a janela da troca ("Esc igual à seta", decisão do proprietário). O roteiro
+            # conta quantos foram precisos e REPROVA com mais de 1 (na T032, um laço de 3 Esc escondia o 1º Esc ignorado).
+            precisou = 0
             for _ in range(3):
                 tecla("Escape")
+                precisou += 1
                 time.sleep(1)
                 if not any(t == "Ir para a produção" for _, _, t in r.textos()):
-                    fechou = True
                     break
-            tudo_certo &= conferir("FIS-P3: o Esc fecha a janela da troca", r.foto("-5c"), r.textos(),
-                                   nao_tem=[] if fechou else ["Ir para a produção"])
+            aberta = any(t == "Ir para a produção" for _, _, t in r.textos())
+            print(f"MEDIDA FIS-P3: a janela da troca precisou de {precisou} Esc para fechar (aberta no fim: {aberta})",
+                  flush=True)
+            if not conferir("FIS-P3: um Esc fecha a janela da troca", r.foto("-5c"), r.textos(),
+                            nao_tem=["Ir para a produção"]) or precisou != 1:
+                tudo_certo = False
+                print(f"✘ FIS-P3: um Esc fecha a janela da troca: precisou de {precisou}")
             tudo_certo &= conferir("FIS-P3: com impedimento, o ambiente continua o mesmo", r.foto("-6"), r.textos(),
                                    tem=["Ambiente: homologação (teste, sem valor fiscal)"], nao_tem=["Ambiente fiscal trocado."])
             # K12 da R2: o controle positivo do jeito de clicar e digitar usado acima. No campo ligado ("Procurar"), o
@@ -154,7 +156,7 @@ def main():
             procurar = [(x, y) for x, y, t in r.textos_para_clicar() if t == "Procurar (número, nome ou chave)"]
             if not procurar:
                 raise RuntimeError(f"não achei o campo Procurar (veja {r.saida})")
-            xdo("mousemove", str(procurar[-1][0] + DENTRO_DO_CAMPO), str(procurar[-1][1] + 34), "click", "1")
+            xdo("mousemove", str(procurar[-1][0]), str(procurar[-1][1] + 34), "click", "1")
             time.sleep(0.5)
             xdo("type", "--delay", "40", "zqxwvk")
             time.sleep(1.5)

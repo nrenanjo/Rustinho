@@ -108,6 +108,14 @@ Popup {
             acceptedButtons: Qt.AllButtons
             grabPermissions: PointerHandler.CanTakeOverFromAnything
         }
+        // T033 da 005 (M-1 da R12): o TapHandler acima não ACEITA o clique (a entrega continua para baixo). Um clique que
+        // nenhum controle da janelinha aceita (num botão desligado, por exemplo o "Trocar" com impedimento) atravessava
+        // a janelinha modal e chegava ao TapHandler de uma linha da tela de trás: abria o detalhe de uma nota por baixo,
+        // e o Esc seguinte fechava esse detalhe, e não a janelinha. O MouseArea aceita o clique, e ele para aqui.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+        }
         Seta {
             id: setaDoPainel
             visible: painel.mostraSeta
