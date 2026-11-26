@@ -1289,3 +1289,36 @@ fn t029_juncao_sem_produto_nao_quebra_as_leituras() {
     let f = crate::produtos::ficha(&b.conn, &k).expect("a ficha da peça que ficou abre");
     assert_eq!(f.id, k);
 }
+
+/// T021 / R8-N8 (007): a visão `produto_raiz` (que soma as vendas por peça) e `estoque::raiz` (onde o estoque é
+/// lançado) dão a mesma raiz, inclusive num círculo de junções (o menor id do círculo) e na peça que leva ao círculo.
+#[test]
+fn t021_r8n8_a_raiz_da_visao_e_a_do_estoque_sao_a_mesma() {
+    let b = Banco::em_memoria().unwrap();
+    let u = crate::faixas::para_testes::configurar(&b, "Caixa 1", 0);
+    let p: Vec<String> = (0..6).map(|i| crate::faixas::para_testes::peca(&b, &u, &format!("Peça {i}"))).collect();
+    let mut ids = p.clone();
+    ids.sort();
+    let (a, bb, x, y, c, d) = (&ids[1], &ids[2], &ids[0], &ids[3], &ids[4], &ids[5]);
+    b.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+    for (de, para) in [(a, bb), (bb, a), (x, a), (y, x), (c, d)] {
+        b.conn
+            .execute(
+                "INSERT INTO produto_juncao (produto_id, para_id, em, por, motivo) VALUES (?1, ?2, '2026-11-26', NULL, 'x')",
+                [de, para],
+            )
+            .unwrap();
+    }
+    b.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+    for peca in [a, bb, x, y, c, d] {
+        let da_visao: String = b
+            .conn
+            .query_row("SELECT COALESCE((SELECT raiz FROM produto_raiz WHERE produto_id = ?1), ?1)", [peca], |l| {
+                l.get(0)
+            })
+            .unwrap();
+        assert_eq!(da_visao, crate::estoque::raiz(&b.conn, peca).unwrap(), "peça {peca}");
+    }
+    assert_eq!(crate::estoque::raiz(&b.conn, y).unwrap(), *a, "y → x → círculo {{a, b}}: o menor do círculo");
+    assert_eq!(crate::estoque::raiz(&b.conn, c).unwrap(), *d);
+}

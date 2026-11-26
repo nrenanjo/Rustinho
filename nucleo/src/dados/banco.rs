@@ -45,6 +45,7 @@ pub(crate) const MIGRACOES: &[&str] = &[
     include_str!("../migracoes/0031_produto_juncao.sql"),
     include_str!("../migracoes/0032_regras_st_com_fonte.sql"),
     include_str!("../migracoes/0033_nota_fiscal.sql"),
+    include_str!("../migracoes/0034_raiz_no_circulo.sql"),
 ];
 
 /// Primeira linha da migração que recria tabelas: ela roda com as chaves
@@ -1089,7 +1090,7 @@ mod testes {
         // caixas do protocolo 4, etapa 2) e a 0027 (R0 e QT-1b: a operação já
         // feita e o aviso de fechamento inesperado). Números provisórios (MIG-1 (a)).
         // A 0.9.19 (etapa 3) acrescentou a 0032 (as regras de ST com a fonte) e a 0033 (a nota fiscal).
-        assert_eq!(MIGRACOES.len(), 33);
+        assert_eq!(MIGRACOES.len(), 34);
     }
 
     /// Protocolo 4, etapa 2: a migração 25 → 26 só cria o registro de caixas
