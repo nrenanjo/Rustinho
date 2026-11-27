@@ -173,6 +173,46 @@ pub(super) fn enviar_lotes(conn: &Connection, caminho_db: &Path) -> Resultado<us
     Ok(conferidos)
 }
 
+/// E7-5 (P-09 (a)): os lotes ficam 7 dias no Drive.
+pub(crate) const DIAS_DOS_LOTES: i64 = 7;
+
+/// E7-5: apaga do Drive os lotes deste computador com mais de 7 dias E anteriores à hora da cópia do dia conferida (o
+/// que eles têm já está nela). Sem cópia do dia conferida, nenhum sai; sem a chave confirmada por um gerente neste caixa,
+/// nenhum sai (T097). A hora do lote é a que o Drive guarda (`lsf --format pt`, hora local), passada para UTC.
+pub(super) fn limpar_lotes(conn: &Connection) -> Resultado<usize> {
+    let Some(remota) = pasta_no_drive(conn)? else { return Ok(0) };
+    if !chave_confirmada(conn)? {
+        return Ok(0);
+    }
+    let Some(copia) = hora_da_copia_conferida(conn)? else { return Ok(0) };
+    let saida = match rclone(
+        &["lsf", "--files-only", "--format", "pt", "--separator", "|", &remota],
+        Duration::from_secs(60),
+    ) {
+        Ok(s) => s,
+        Err(e) if e.to_string().contains("directory not found") => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let mut apagados = 0;
+    for l in saida.lines() {
+        let Some((nome, hora)) = l.split_once('|') else { continue };
+        if ler_nome_do_lote(nome).is_none() {
+            continue;
+        }
+        let sai: bool = conn
+            .query_row(
+                "SELECT julianday('now') - julianday(?1, 'utc') > ?2 AND julianday(?1, 'utc') < julianday(?3)",
+                params![hora.trim(), DIAS_DOS_LOTES, copia],
+                |r| r.get::<_, Option<bool>>(0),
+            )?
+            .unwrap_or(false);
+        if sai && rclone(&["deletefile", &format!("{remota}/{nome}")], Duration::from_secs(60)).is_ok() {
+            apagados += 1;
+        }
+    }
+    Ok(apagados)
+}
+
 /// Uma volta do cofre: gera e manda. O erro fica anotado (a tela mostra), e não para o backup do dia.
 pub(super) fn volta(conn: &Connection, caminho_db: &Path) -> Resultado<usize> {
     if !ajustes(conn, Some(caminho_db))?.nuvem {
@@ -180,6 +220,8 @@ pub(super) fn volta(conn: &Connection, caminho_db: &Path) -> Resultado<usize> {
     }
     let r = gerar_lotes(conn, caminho_db).and_then(|_| enviar_lotes(conn, caminho_db));
     config::gravar(conn, LOTE_ERRO, &r.as_ref().err().map(|e| e.to_string()).unwrap_or_default())?;
+    // A limpeza não desfaz nada do envio; um erro nela fica para a próxima volta.
+    let _ = limpar_lotes(conn);
     r
 }
 
@@ -421,6 +463,54 @@ mod testes {
         assert_eq!(aviso(&b).as_deref(), Some("atencao"), "pendente há 6 min: Atenção");
         mudar(&b, "-25 hours");
         assert_eq!(aviso(&b).as_deref(), Some("critica"), "pendente há mais de 24 h: Crítico");
+    }
+
+    /// E7-5: no Drive, sai o lote de mais de 7 dias que é anterior à cópia do dia conferida; fica o de 2 dias, e fica o de
+    /// 10 dias se a cópia conferida é mais velha que ele.
+    #[test]
+    fn e7_5_lotes_ficam_7_dias_e_so_saem_cobertos_pela_copia() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste do cofre pulado");
+            return;
+        }
+        let (b, caminho, nuvem) = loja_de_teste("cofre-limpeza");
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let remota = pasta_no_drive(&b.conn).unwrap().unwrap();
+        std::fs::create_dir_all(&remota).unwrap();
+        let lote = |nome: &str, dias: u64| {
+            let f = std::fs::File::create(Path::new(&remota).join(nome)).unwrap();
+            f.set_modified(std::time::SystemTime::now() - Duration::from_secs(dias * 86400)).unwrap();
+        };
+        let velho = nome_do_lote(1, 10);
+        let novo = nome_do_lote(11, 20);
+        let copia_em = |dias: i64| {
+            let d: String = b
+                .conn
+                .query_row(&format!("SELECT strftime('%Y%m%d-%H%M%S', 'now', 'localtime', '-{dias} days')"), [], |l| {
+                    l.get(0)
+                })
+                .unwrap();
+            config::gravar(
+                &b.conn,
+                CONFERIDA_NO_DRIVE,
+                &json!({ "nome": format!("rustinho-{d}-abc.{EXTENSAO}") }).to_string(),
+            )
+            .unwrap();
+        };
+        // A cópia conferida é de 20 dias atrás: o lote de 10 dias tem coisa que ela não tem, e fica.
+        lote(&velho, 10);
+        lote(&novo, 2);
+        copia_em(20);
+        assert_eq!(limpar_lotes(&b.conn).unwrap(), 0);
+        // A cópia conferida é de agora: o de 10 dias está nela e sai; o de 2 dias fica (7 dias).
+        copia_em(0);
+        assert_eq!(limpar_lotes(&b.conn).unwrap(), 1);
+        let ficaram: Vec<String> =
+            std::fs::read_dir(&remota).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(ficaram, vec![novo.clone()]);
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
     }
 
     #[test]
