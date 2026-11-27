@@ -13,6 +13,8 @@ FocusScope {
     // E7-7 (PEND-30 (a), decisão do proprietário de 26/11/2026): com o banco vazio e cópias da loja na pasta de backup
     // deste computador (o Rustinho reinstalado), oferece restaurar antes de criar uma loja nova.
     property var copias: []
+    // B7 da R1 da 008: a cópia escolhida (a mais nova; dá para escolher outra se ela não abrir).
+    property int escolhida: 0
     Component.onCompleted: {
         const r = Api.chamar("inicio_copias", {})
         copias = r.ok && Array.isArray(r.dados) ? r.dados : []
@@ -20,7 +22,7 @@ FocusScope {
 
     function restaurarCopia() {
         senhaCopia.erro = ""
-        const c = copias[0]
+        const c = copias[escolhida]
         Api.chamarDemorado("inicio_restaurar", { arquivo: c.caminho, senha: senhaCopia.texto }, "Restaurando a loja…", r => {
             if (r.ok) {
                 painelRestaurar.close()
@@ -198,10 +200,36 @@ FocusScope {
             Titulo { text: "Restaurar a loja"; font.pixelSize: 30; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Nota {
                 text: tela.copias.length === 0 ? ""
-                      : "A loja volta como estava na cópia de " + tela.copias[0].quando
+                      : "A loja volta como estava na cópia de " + tela.copias[tela.escolhida].quando
                         + ". Digite a senha de um gerente da loja (a que ele usava quando a cópia foi feita)."
                 font.pixelSize: 15
                 Layout.fillWidth: true
+            }
+            // B7: se a mais nova não abrir, outra das mais novas (até 5, sem paginação).
+            Nota {
+                visible: tela.copias.length > 1
+                text: "Outras cópias:"
+                font.pixelSize: 15
+            }
+            Flow {
+                visible: tela.copias.length > 1
+                spacing: 8
+                Layout.fillWidth: true
+                Repeater {
+                    model: tela.copias.slice(0, 5)
+                    delegate: Botao {
+                        required property var modelData
+                        required property int index
+                        objectName: "copia_" + index
+                        text: modelData.quando
+                        tipo: index === tela.escolhida ? "principal" : "secundario"
+                        onClicked: {
+                            tela.escolhida = index
+                            senhaCopia.erro = ""
+                            senhaCopia.focarSempre()
+                        }
+                    }
+                }
             }
             Campo {
                 id: senhaCopia

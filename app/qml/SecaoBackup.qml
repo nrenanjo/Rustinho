@@ -316,14 +316,14 @@ ColumnLayout {
                         { ok: secao.b.protecao.nivel === "em_dia",
                           ruim: secao.b.protecao.nivel === "critico",
                           texto: secao.b.protecao.nivel === "em_dia"
-                                 ? "Proteção contínua: em dia (o que este caixa fez está no Google Drive, conferido)"
+                                 ? "Proteção contínua: em dia (as mudanças feitas neste computador estão no Google Drive, conferidas)"
                                  : (secao.b.protecao.nivel === "critico" ? "Proteção contínua: atrasada há mais de um dia"
                                                                           : "Proteção contínua: pendente")
                                    + (secao.b.protecao.desde ? " desde " + secao.quando(secao.b.protecao.desde) : "")
                                    + " (" + secao.b.protecao.pendentes
-                                   + (secao.b.protecao.pendentes === 1 ? " operação deste caixa ainda não está" : " operações deste caixa ainda não estão")
+                                   + (secao.b.protecao.pendentes === 1 ? " mudança feita neste computador ainda não está" : " mudanças feitas neste computador ainda não estão")
                                    + " no Google Drive)"
-                                   + (secao.b.loteErro ? ". " + secao.b.loteErro : ". O Rustinho manda sozinho em seguida.") }
+                                   + (secao.b.loteErro ? ". " + secao.b.loteErro : ". O Rustinho manda sozinho: as mudanças novas a cada minuto, e as de antes da proteção contínua na cópia do dia.") }
                     ])
                     delegate: RowLayout {
                         required property var modelData
@@ -506,9 +506,19 @@ ColumnLayout {
             visible: !!secao.b && secao.b.drive
             spacing: 12
             Layout.fillWidth: true
-            Nota {
-                text: "Cada backup do dia também vai para o seu Drive, trancado (abre com a senha de um gerente). Lá ficam os mesmos " + (secao.b ? secao.b.dias : "") + " dias."
+            ColumnLayout {
+                spacing: 6
                 Layout.fillWidth: true
+                Nota {
+                    text: "Cada backup do dia também vai para o seu Drive, trancado (abre com a senha de um gerente). Lá ficam os mesmos " + (secao.b ? secao.b.dias : "") + " dias."
+                    Layout.fillWidth: true
+                }
+                // T009 da 008 (a decisão do proprietário de 27/11/2026: na Beta, a recuperação é só a cópia do dia).
+                Nota {
+                    objectName: "limiteDaRecuperacao"
+                    text: "Para recuperar a loja, ela volta como estava na última cópia do dia. As mudanças de cada minuto ficam guardadas no Google Drive, mas nesta versão não entram na recuperação."
+                    Layout.fillWidth: true
+                }
             }
             Botao {
                 text: "Parar de mandar"

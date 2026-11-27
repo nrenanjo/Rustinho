@@ -1270,9 +1270,9 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             &hoje,
             "Backup".into(),
             if critico {
-                "Há operações deste caixa fora do Google Drive há mais de um dia".into()
+                "Há mudanças feitas neste computador fora do Google Drive há mais de um dia".into()
             } else {
-                "Há operações deste caixa que ainda não chegaram ao Google Drive".into()
+                "Há mudanças feitas neste computador que ainda não chegaram ao Google Drive".into()
             },
             String::new(),
             "configuracoes",
@@ -1284,9 +1284,9 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
              normalmente: o Rustinho manda sozinho quando der.",
             p.pendentes,
             if p.pendentes == 1 {
-                "operação ainda não está no Google Drive"
+                "mudança feita neste computador ainda não está no Google Drive"
             } else {
-                "operações ainda não estão no Google Drive"
+                "mudanças feitas neste computador ainda não estão no Google Drive"
             }
         );
         avisos.push(a);

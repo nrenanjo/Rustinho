@@ -108,7 +108,7 @@ PESOS_SEGUNDOS = {
     "telas_fis_descoberta": 35,
     "telas_janelinha_nao_vaza": 30,
     "telas_backup_protecao": 60,
-    "telas_inicio_restaurar": 60,
+    "telas_inicio_restaurar": 100,
     "telas_r24_gerente": 25,
     "telas_r3_comissao": 25,
     "telas_r19_cheque": 25,
