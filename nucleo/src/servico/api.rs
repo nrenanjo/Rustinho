@@ -2810,6 +2810,11 @@ impl Servico {
                 .collect::<Vec<_>>(),
             "interfaces": a.interfaces.join(", "),
             "interfacesIgnoradas": sync::interfaces_ignoradas(&a.interfaces),
+            // E6-1 (T003 da 009): as VPNs de camada 3 deste computador, só para informar.
+            "vpns": crate::rede_local::vpns(&crate::rede_local::listar().unwrap_or_default())
+                .into_iter()
+                .map(|(nome, ip)| json!({ "nome": nome, "ip": ip.to_string() }))
+                .collect::<Vec<_>>(),
             "caixa": a.nome,
             "pares": sync::pares(conn)?,
             "meuEndereco": endereco_local(),

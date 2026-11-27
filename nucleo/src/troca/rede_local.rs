@@ -67,6 +67,23 @@ impl Interface {
     }
 }
 
+/// E6-1 (T003 da 009): uma VPN de camada 3 (WireGuard, OpenVPN `tun`, Tailscale), pelo nome. Só para mostrar na tela
+/// ("VPN wg0: 10.8.0.2"): ela continua sem anunciar nada (é virtual). As de camada 2 (`tap`, ZeroTier) ficam de fora.
+pub fn vpn_camada3(nome: &str) -> bool {
+    let n = nome.to_lowercase();
+    // As de camada 2 primeiro: no Windows, o adaptador do OpenVPN `tap` chama "OpenVPN TAP-Windows6".
+    if n.contains("tap") || n.contains("zerotier") {
+        return false;
+    }
+    ["tun", "wg", "utun"].iter().any(|p| n.starts_with(p))
+        || ["tailscale", "wireguard", "openvpn"].iter().any(|t| n.contains(t))
+}
+
+/// As VPNs de camada 3 desta lista, com o IP de cada uma (para a tela).
+pub fn vpns(lista: &[Interface]) -> Vec<(String, Ipv4Addr)> {
+    lista.iter().filter(|i| vpn_camada3(&i.nome)).map(|i| (i.nome.clone(), i.ip)).collect()
+}
+
 /// Classifica uma interface pelo nome que o sistema dá a ela (Linux, Android
 /// e Windows, inclusive em português). Quando o nome não diz nada, é
 /// `Desconhecida` (nem a primeira nem a última da fila). Em Linux e Android
@@ -1033,5 +1050,21 @@ mod testes {
         assert!(erros_novos(&mut ja, erros.clone()).is_empty(), "repetido: não registra de novo");
         assert!(erros_novos(&mut ja, vec![]).is_empty());
         assert_eq!(erros_novos(&mut ja, erros).len(), 1, "voltou a dar erro depois de ter funcionado: registra");
+    }
+    /// E6-1 (T003 da 009): as VPNs de camada 3 aparecem com o IP; as de camada 2 e o resto, não.
+    #[test]
+    fn t003_vpns_de_camada_3_com_o_ip() {
+        for sim in ["wg0", "tun0", "utun3", "tailscale0", "WireGuard Tunnel", "OpenVPN Data Channel Offload"] {
+            assert!(vpn_camada3(sim), "{sim}");
+        }
+        for nao in ["tap0", "OpenVPN TAP-Windows6", "TAP-Windows Adapter V9", "zt3jnxyz", "ZeroTier One", "eth0", "wlan0", "docker0", "veth12", "rmnet0"] {
+            assert!(!vpn_camada3(nao), "{nao}");
+        }
+        let lista = vec![
+            Interface::de_teste("eth0", [192, 168, 0, 10], 24, Tipo::Cabo),
+            Interface::de_teste("wg0", [10, 8, 0, 2], 24, Tipo::Virtual),
+            Interface::de_teste("tap0", [10, 9, 0, 2], 24, Tipo::Virtual),
+        ];
+        assert_eq!(vpns(&lista), vec![("wg0".to_string(), Ipv4Addr::new(10, 8, 0, 2))]);
     }
 }

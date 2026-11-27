@@ -1788,6 +1788,16 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                     }
+                    // E6-1 (T003 da 009): as VPNs de camada 3 deste computador, só para informar.
+                    Nota {
+                        objectName: "vpnsDesteComputador"
+                        visible: !!tela.sync && !!tela.sync.vpns && tela.sync.vpns.length > 0
+                        text: !tela.sync || !tela.sync.vpns ? ""
+                              : "VPN neste computador: " + tela.sync.vpns.map(v => v.nome + " (" + v.ip + ")").join(", ")
+                                + ". Os outros caixas podem usar este endereço."
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                    }
                     // E6-1 (T002 da 009): o IP que cada nome digitado deu no último ciclo (ou o erro).
                     Nota {
                         objectName: "nomesResolvidos"
