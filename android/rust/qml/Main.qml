@@ -1488,6 +1488,17 @@ ApplicationWindow {
         }
     }
 
+    // E7-2 (A4 da R1 da 008): o cofre contínuo no Google Drive, a cada minuto,
+    // com o temporizador próprio (o do backup do dia passa a 5 min). O núcleo
+    // pula a volta enquanto espera depois de uma falha.
+    Timer {
+        objectName: "temporizadorDoCofre"
+        interval: 60 * 1000
+        running: true
+        repeat: true
+        onTriggered: Api.chamar("backup_cofre")
+    }
+
     // Ao fechar: faz o backup (se o último tem mais de meia hora) e fecha.
     // REC-6 / ES-1: se houver operação crítica em andamento (venda, recebimento,
     // importação, backup ou restauração), pede confirmação explicando o que está em

@@ -242,6 +242,42 @@ pub(super) fn volta(conn: &Connection, caminho_db: &Path) -> Resultado<usize> {
     r
 }
 
+/// M5 da R1 da 008: a espera depois de falhas seguidas (`{"falhas": n, "ate": "<UTC>"}`; local).
+pub(super) const ESPERA: &str = "backup_cofre_espera";
+
+/// A espera (s) depois da n-ésima falha seguida: 1, 2, 4, 8 e, dali em diante, 15 min.
+pub(super) fn espera_depois_de(falhas: i64) -> i64 {
+    (60_i64 << (falhas.clamp(1, 5) - 1)).min(900)
+}
+
+/// A volta do temporizador: pula enquanto a espera de uma falha não passou; depois de uma falha, espera mais; um
+/// acerto zera a espera.
+pub(super) fn volta_com_espera(conn: &Connection, caminho_db: &Path) -> Resultado<usize> {
+    let antes: Value = config::ler(conn, ESPERA)?.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or(Value::Null);
+    let falhas = antes["falhas"].as_i64().unwrap_or(0);
+    if let Some(ate) = antes["ate"].as_str() {
+        let ainda: bool = conn.query_row("SELECT ?1 > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", [ate], |l| l.get(0))?;
+        if ainda {
+            return Ok(0);
+        }
+    }
+    let r = volta(conn, caminho_db);
+    if r.is_ok() {
+        if falhas > 0 {
+            config::gravar(conn, ESPERA, "")?;
+        }
+    } else {
+        let n = falhas + 1;
+        let ate: String = conn.query_row(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?1)",
+            [format!("+{} seconds", espera_depois_de(n))],
+            |l| l.get(0),
+        )?;
+        config::gravar(conn, ESPERA, &json!({ "falhas": n, "ate": ate }).to_string())?;
+    }
+    r
+}
+
 /// E7-4 (P-10 (a), decisão do proprietário de 26/11/2026; testes 16 a 18 de `docs/SIMULTANEIDADE-requisitos.md`): o estado
 /// da proteção deste computador. `nivel`:
 /// - "sem_cofre": o Drive está desligado (nada é declarado protegido);
@@ -451,6 +487,170 @@ mod testes {
             "nenhuma temporária ficou"
         );
         let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    }
+
+    /// Espera a vez do cofre ficar livre (uma volta deixada correndo por um teste termina antes do próximo).
+    fn esperar_o_cofre_parar() {
+        assert!(super::super::VezDoCofre::esperar(Duration::from_secs(30)).is_some(), "o cofre não parou");
+    }
+
+    fn rclone_falso(pasta: &Path, nome: &str, corpo: &str) -> PathBuf {
+        let p = pasta.join(nome);
+        std::fs::write(&p, format!("#!/bin/sh\n{corpo}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    /// M5 da R1 da 008: o cofre tem a vez própria; com o backup do dia ocupado (uma cópia grande indo para o Drive),
+    /// a volta do cofre acontece do mesmo jeito.
+    #[test]
+    fn e7_2_m5_o_cofre_nao_espera_o_backup_do_dia() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste do cofre pulado");
+            return;
+        }
+        let (b, caminho, nuvem) = loja_de_teste("cofre-vez-propria");
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        partida(&b.conn).unwrap();
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        let ocupado = super::super::Vez::pegar("Mandando a cópia do dia…").expect("o backup do dia estava livre");
+        super::super::cofre_automatico(caminho.clone());
+        let inicio = std::time::Instant::now();
+        while ler_seq(&b.conn, CONFERIDO_ATE).unwrap().is_none() && inicio.elapsed() < Duration::from_secs(30) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let conferido = ler_seq(&b.conn, CONFERIDO_ATE).unwrap();
+        drop(ocupado);
+        esperar_o_cofre_parar();
+        std::env::remove_var("RUSTINHO_REMOTO");
+        assert!(conferido.is_some(), "o cofre andou com o backup do dia ocupado");
+        let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    }
+
+    /// M5 da R1 da 008: depois de uma falha, o temporizador espera mais a cada vez (1, 2, 4, 8, 15 min), sem chamar o
+    /// Drive no meio; um acerto zera a espera.
+    #[test]
+    fn e7_2_m5_espera_crescente_depois_de_falhas() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!((1..=7).map(espera_depois_de).collect::<Vec<_>>(), vec![60, 120, 240, 480, 900, 900, 900]);
+        let (b, caminho, nuvem) = loja_de_teste("cofre-espera");
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let pasta = caminho.parent().unwrap().to_path_buf();
+        let registro = pasta.join("chamadas.txt");
+        let falso = rclone_falso(&pasta, "rclone-fora.sh", &format!("echo \"$1\" >> '{}'\nexit 1", registro.display()));
+        std::env::set_var("RUSTINHO_RCLONE", falso.display().to_string());
+        partida(&b.conn).unwrap();
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        let chamadas = || std::fs::read_to_string(&registro).unwrap_or_default().lines().count();
+        let espera = || -> Value { serde_json::from_str(&config::ler(&b.conn, ESPERA).unwrap().unwrap()).unwrap() };
+        let segundos_ate = |e: &Value| -> i64 {
+            b.conn
+                .query_row(
+                    "SELECT CAST(strftime('%s', ?1) AS INTEGER) - CAST(strftime('%s', 'now') AS INTEGER)",
+                    [e["ate"].as_str().unwrap()],
+                    |l| l.get(0),
+                )
+                .unwrap()
+        };
+        assert!(volta_com_espera(&b.conn, &caminho).is_err());
+        let n1 = chamadas();
+        assert!(n1 > 0, "chamou o Drive");
+        let e1 = espera();
+        assert_eq!(e1["falhas"], json!(1));
+        assert!((55..=60).contains(&segundos_ate(&e1)), "1 min: {e1}");
+        // Dentro da espera: nada de Drive.
+        assert_eq!(volta_com_espera(&b.conn, &caminho).unwrap(), 0);
+        assert_eq!(chamadas(), n1, "na espera não chama o Drive");
+        // Passada a espera, tenta de novo; falha de novo: 2 min.
+        config::gravar(&b.conn, ESPERA, &json!({ "falhas": 1, "ate": "2000-01-01T00:00:00Z" }).to_string()).unwrap();
+        assert!(volta_com_espera(&b.conn, &caminho).is_err());
+        assert!(chamadas() > n1);
+        let e2 = espera();
+        assert_eq!(e2["falhas"], json!(2));
+        assert!((115..=120).contains(&segundos_ate(&e2)), "2 min: {e2}");
+        std::env::remove_var("RUSTINHO_RCLONE");
+        // O Drive volta: o acerto zera a espera.
+        if rclone_instalado() {
+            config::gravar(&b.conn, ESPERA, &json!({ "falhas": 2, "ate": "2000-01-01T00:00:00Z" }).to_string())
+                .unwrap();
+            assert_eq!(volta_com_espera(&b.conn, &caminho).unwrap(), 1);
+            assert_eq!(config::ler(&b.conn, ESPERA).unwrap().unwrap_or_default(), "", "o acerto zera a espera");
+        }
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// M5 da R1 da 008: a restauração não troca o banco com o cofre no meio de uma volta (ele grava no banco): espera
+    /// a vez dele e, se não vier, diz para tentar de novo.
+    #[test]
+    fn e7_2_m5_restauracao_espera_o_cofre() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut b, caminho, _nuvem) = loja_de_teste("cofre-restauracao");
+        let cofre = super::super::VezDoCofre::pegar().expect("o cofre estava livre");
+        super::super::limites_de_teste::COFRE_NA_RESTAURACAO.with(|c| c.set(Some(1)));
+        let com_o_cofre =
+            super::super::restaurar_por(&mut b.conn, Some(&caminho), "nao-existe.rbk", false, "1111", None);
+        drop(cofre);
+        let sem_o_cofre =
+            super::super::restaurar_por(&mut b.conn, Some(&caminho), "nao-existe.rbk", false, "1111", None);
+        super::super::limites_de_teste::COFRE_NA_RESTAURACAO.with(|c| c.set(None));
+        let e = com_o_cofre.unwrap_err().to_string();
+        assert!(e.contains("últimas vendas para o Google Drive"), "{e}");
+        let e = sem_o_cofre.unwrap_err().to_string();
+        assert!(!e.contains("últimas vendas"), "sem o cofre, a restauração segue (e falha pelo arquivo): {e}");
+        let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    }
+
+    /// B8 e M5 da R1 da 008: ao fechar, o cofre manda o que falta para o Drive; e não segura o fechar mais que o
+    /// limite (20 s; aqui 1 s, com um Drive que demora 5 s).
+    #[test]
+    fn e7_2_b8_ao_fechar_o_cofre_manda_o_que_falta() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste do cofre pulado");
+            return;
+        }
+        let (b, caminho, nuvem) = loja_de_teste("cofre-ao-fechar");
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        partida(&b.conn).unwrap();
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        super::super::ao_fechar(&caminho).unwrap();
+        let conferido = ler_seq(&b.conn, CONFERIDO_ATE).unwrap();
+        assert!(conferido.is_some(), "ao fechar, o lote foi e conferiu");
+        // Um Drive lento não segura o fechar além do limite.
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Caio", "3333", false).unwrap();
+        let lento = rclone_falso(caminho.parent().unwrap(), "rclone-lento.sh", "sleep 5\nexec rclone \"$@\"");
+        std::env::set_var("RUSTINHO_RCLONE", lento.display().to_string());
+        super::super::limites_de_teste::COFRE_AO_FECHAR.with(|c| c.set(Some(1)));
+        let inicio = std::time::Instant::now();
+        super::super::cofre_ao_fechar(&caminho);
+        let levou = inicio.elapsed();
+        super::super::limites_de_teste::COFRE_AO_FECHAR.with(|c| c.set(None));
+        esperar_o_cofre_parar();
+        std::env::remove_var("RUSTINHO_RCLONE");
+        std::env::remove_var("RUSTINHO_REMOTO");
+        assert!(levou < Duration::from_secs(3), "o fechar esperou {levou:?}");
+        let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    }
+
+    /// A4 da R1 da 008: a tela chama o cofre a cada minuto, sempre (o temporizador do backup do dia passa a 5 min
+    /// depois do primeiro disparo; o do cofre é outro e não muda de intervalo). Vale para as duas cópias da tela.
+    #[test]
+    fn e7_2_a4_o_temporizador_do_cofre_e_de_um_minuto() {
+        for tela in ["../app/qml/Main.qml", "../android/rust/qml/Main.qml"] {
+            let qml = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(tela)).unwrap();
+            let chamada = qml.find("Api.chamar(\"backup_cofre\")").unwrap_or_else(|| panic!("{tela}: sem o cofre"));
+            let inicio = qml[..chamada].rfind("Timer {").unwrap();
+            let fim = chamada + qml[chamada..].find('}').unwrap();
+            let bloco = &qml[inicio..fim];
+            for deve in ["interval: 60 * 1000", "running: true", "repeat: true"] {
+                assert!(bloco.contains(deve), "{tela}: o temporizador do cofre sem \"{deve}\":\n{bloco}");
+            }
+            assert!(!bloco.contains("interval ="), "{tela}: o intervalo do cofre não muda:\n{bloco}");
+            assert_eq!(qml.matches("Api.chamar(\"backup_cofre\")").count(), 1, "{tela}");
+        }
     }
 
     /// E7-3 (D3): só a conferência faz o cofre andar; um lote mandado e conferido sai da pasta local, e um envio cortado

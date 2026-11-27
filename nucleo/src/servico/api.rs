@@ -417,6 +417,8 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     // F03 (dev.3.3, 2.3): o lugar do quadro da câmera é do núcleo.
     ("codigo_caminho_foto", Classe::LeituraSemSessao),
     ("backup_automatico", Classe::SemSessao),
+    // E7-2 (A4 e M5 da R1 da 008): o cofre contínuo, no temporizador próprio (a cada minuto).
+    ("backup_cofre", Classe::SemSessao),
     ("backup_ao_fechar", Classe::SemSessao),
     ("sair", Classe::SemSessao),
     ("trabalho_fechamento_avaliar", Classe::LeituraSemSessao),
@@ -1341,6 +1343,14 @@ impl Servico {
                 if let Some(c) = &self.banco.caminho {
                     if usuarios::quantidade(&self.banco.conn)? > 0 {
                         backup::automatico(c.clone());
+                    }
+                }
+                Ok(Value::Null)
+            }
+            "backup_cofre" => {
+                if let Some(c) = &self.banco.caminho {
+                    if usuarios::quantidade(&self.banco.conn)? > 0 {
+                        backup::cofre_automatico(c.clone());
                     }
                 }
                 Ok(Value::Null)

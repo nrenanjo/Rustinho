@@ -108,6 +108,44 @@ pub fn fazendo() -> String {
     FAZENDO.lock().map(|f| f.clone()).unwrap_or_default()
 }
 
+/// M5 da R1 da 008: a vez do cofre contínuo, separada da do backup do dia (o envio de uma cópia grande para o Drive
+/// pode levar meia hora, e o cofre não espera por ele). A restauração pega as duas: nada do cofre grava no banco
+/// enquanto ele é trocado.
+static COFRE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) struct VezDoCofre;
+
+impl VezDoCofre {
+    pub(crate) fn pegar() -> Option<VezDoCofre> {
+        // Sem `then_some(VezDoCofre)`: o valor seria criado (e descartado) mesmo com a vez ocupada, e o `Drop` dele
+        // soltaria a vez de quem a tem.
+        if COFRE.swap(true, Ordering::SeqCst) {
+            return None;
+        }
+        Some(VezDoCofre)
+    }
+
+    /// Espera a vez até `limite`.
+    pub(crate) fn esperar(limite: Duration) -> Option<VezDoCofre> {
+        let inicio = Instant::now();
+        loop {
+            if let Some(v) = VezDoCofre::pegar() {
+                return Some(v);
+            }
+            if inicio.elapsed() >= limite {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
+impl Drop for VezDoCofre {
+    fn drop(&mut self) {
+        COFRE.store(false, Ordering::SeqCst);
+    }
+}
+
 pub fn ocupado() -> bool {
     OCUPADO.load(Ordering::SeqCst)
 }
@@ -778,6 +816,9 @@ mod limites_de_teste {
         pub static IDADE_DAS_SOBRAS: Cell<Option<u64>> = const { Cell::new(None) };
         /// A3 da R1 da 008: o cofre "cai" logo depois de gravar o claro do lote (sem limpar nada).
         pub static QUEDA_NO_LOTE: Cell<bool> = const { Cell::new(false) };
+        /// M5 da R1 da 008: quanto (s) o fechar espera o cofre, e a restauração espera a vez do cofre.
+        pub static COFRE_AO_FECHAR: Cell<Option<u64>> = const { Cell::new(None) };
+        pub static COFRE_NA_RESTAURACAO: Cell<Option<u64>> = const { Cell::new(None) };
     }
 }
 
@@ -942,6 +983,14 @@ fn apagar_sobras(privada: &Path) {
     }
 }
 
+fn limite_do_cofre_na_restauracao() -> u64 {
+    #[cfg(test)]
+    if let Some(s) = limites_de_teste::COFRE_NA_RESTAURACAO.with(|c| c.get()) {
+        return s;
+    }
+    120
+}
+
 fn idade_das_sobras() -> Duration {
     #[cfg(test)]
     if let Some(s) = limites_de_teste::IDADE_DAS_SOBRAS.with(|c| c.get()) {
@@ -1087,7 +1136,8 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     }
     // M1 da R1 da 008: o que a cópia TEM deste computador é o `MAX(seq)` lido NA FOTO (e não a hora do nome, gravado
     // depois do zip: o que entrasse no meio contaria como coberto sem estar na cópia).
-    let seq_da_foto: Option<i64> = if copia_bruta {
+    // A cópia de um banco com defeito é só para o suporte: nunca conta como proteção, e nada é gravado nele (A3).
+    let seq_da_foto: Option<i64> = if copia_bruta || defeito_na_origem.is_some() {
         None
     } else {
         Connection::open_with_flags(&foto, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok().and_then(|f| {
@@ -1409,9 +1459,49 @@ pub fn automatico(caminho_db: PathBuf) {
             let _ = anotar(&conn, &r);
         }
         let _ = enviar_pendentes(&conn, &caminho_db);
-        // E7-2: o cofre contínuo, na mesma volta (o temporizador de 60 s da tela). O erro fica anotado nele.
-        let _ = cofre::volta(&conn, &caminho_db);
     });
+}
+
+/// E7-2 (A4 e M5 da R1 da 008): o cofre contínuo, no temporizador próprio da tela (a cada minuto) e na vez própria
+/// dele: o backup do dia (a cópia e o envio dela) não o segura. Depois de uma falha, espera mais a cada vez (até 15
+/// min). O erro fica anotado no cofre.
+pub fn cofre_automatico(caminho_db: PathBuf) {
+    if banco::defeito(&caminho_db).is_some() || banco::restauracao_pela_metade(&caminho_db) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let Some(_vez) = VezDoCofre::pegar() else { return };
+        if banco::restauracao_pela_metade(&caminho_db) {
+            return;
+        }
+        let Ok(conn) = abrir_conexao(&caminho_db) else { return };
+        let _ = cofre::volta_com_espera(&conn, &caminho_db);
+    });
+}
+
+/// M5 e B8 da R1 da 008: ao fechar, o cofre manda o que falta (sem a espera crescente), por até 20 s; o que não der
+/// fica para a próxima vez que abrir.
+fn cofre_ao_fechar(caminho_db: &Path) {
+    let limite = Duration::from_secs(limite_do_cofre_ao_fechar());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let c = caminho_db.to_path_buf();
+    std::thread::spawn(move || {
+        if let Some(_vez) = VezDoCofre::esperar(limite) {
+            if let Ok(conn) = abrir_conexao(&c) {
+                let _ = cofre::volta(&conn, &c);
+            }
+        }
+        let _ = tx.send(());
+    });
+    let _ = rx.recv_timeout(limite);
+}
+
+fn limite_do_cofre_ao_fechar() -> u64 {
+    #[cfg(test)]
+    if let Some(s) = limites_de_teste::COFRE_AO_FECHAR.with(|c| c.get()) {
+        return s;
+    }
+    20
 }
 
 /// "Fazer backup agora": cópia no computador e envio para o Drive.
@@ -1442,6 +1532,8 @@ pub fn ao_fechar(caminho_db: &Path) -> Resultado<bool> {
     if banco::defeito(caminho_db).is_some() || banco::restauracao_pela_metade(caminho_db) {
         return Ok(false);
     }
+    // O cofre antes da cópia: o último minuto de vendas vai para o Drive.
+    cofre_ao_fechar(caminho_db);
     // Se um backup está no meio, espera ele acabar (até 2 minutos).
     let inicio = Instant::now();
     let _vez = loop {
@@ -1958,6 +2050,12 @@ pub fn restaurar_por(
 ) -> Resultado<Info> {
     let _vez = Vez::pegar("Restaurando…")
         .ok_or_else(|| Erro::validacao("Tem um backup em andamento. Espere terminar e tente de novo."))?;
+    // M5 da R1 da 008: o cofre termina a volta dele antes (ele grava no banco que vai ser trocado).
+    let _cofre = VezDoCofre::esperar(Duration::from_secs(limite_do_cofre_na_restauracao())).ok_or_else(|| {
+        Erro::validacao(
+            "O Rustinho está mandando as últimas vendas para o Google Drive. Espere um minuto e tente de novo.",
+        )
+    })?;
     let tmp = Temporaria::nova(&pasta_privada(caminho_db))?;
 
     let local = if nuvem {

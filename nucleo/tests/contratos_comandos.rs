@@ -40,6 +40,8 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("backup_agora", "backup", &[]),
     ("backup_ao_fechar", "caixa", &["sem_sessao"]),
     ("backup_automatico", "caixa", &["sem_sessao"]),
+    // E7-2 (A4 e M5 da R1 da 008): o cofre contínuo, no temporizador próprio.
+    ("backup_cofre", "caixa", &["sem_sessao"]),
     ("backup_conectar_drive", "backup", &[]),
     ("backup_conferir", "backup", &["leitura"]),
     ("backup_desligar_drive", "backup", &[]),
