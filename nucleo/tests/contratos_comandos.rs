@@ -164,6 +164,9 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     // passa a exigir a senha (a da tela, DP-52 (b)). Continua só lendo.
     ("importar_previa", "configuracoes", &["leitura"]),
     ("impressao", "leitura", &["leitura"]),
+    // E7-7 (PEND-30 (a), 26/11/2026): a primeira tela oferece restaurar uma cópia da pasta deste computador.
+    ("inicio_copias", "leitura", &["leitura", "sem_sessao"]),
+    ("inicio_restaurar", "caixa", &["sem_sessao"]),
     ("mecanicos", "leitura", &["leitura"]),
     ("menu", "leitura", &["leitura"]),
     ("menu_fixar", "caixa", &["do_caixa"]),

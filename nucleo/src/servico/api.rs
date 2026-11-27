@@ -398,6 +398,11 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     // Sem ninguém conectado (o `match` de `executar_livre`).
     ("estado", Classe::LeituraSemSessao),
     ("configurar_inicio", Classe::SemSessao),
+    // E7-7 (PEND-30 (a), decisão do proprietário de 26/11/2026): com o banco sem usuários e cópias na pasta de backup
+    // deste computador, a primeira tela oferece restaurar (só essas cópias, só sem usuários, com a senha de um gerente
+    // da cópia).
+    ("inicio_copias", Classe::LeituraSemSessao),
+    ("inicio_restaurar", Classe::SemSessao),
     ("usuarios_entrada", Classe::LeituraSemSessao),
     ("entrar", Classe::SemSessao),
     ("sync_juntar", Classe::SemSessao),
@@ -562,7 +567,7 @@ pub const CONSULTAS_FORA_DA_JANELA: &[&str] = &["produtos_buscar"];
 /// leitura para e fecha a conexão; depois, abre uma nova
 /// (`consulta::Leitor::pausar`).
 pub const TROCAM_O_BANCO: &[&str] =
-    &["backup_restaurar", "sync_juntar", "sync_desistir_juntar", "p4_juntar_com_convite"];
+    &["backup_restaurar", "inicio_restaurar", "sync_juntar", "sync_desistir_juntar", "p4_juntar_com_convite"];
 
 /// Comandos que funcionam sem ninguém conectado.
 pub fn sem_sessao(comando: &str) -> bool {
@@ -1199,6 +1204,43 @@ impl Servico {
             // Sem precisar estar conectado.
             "estado" => self.estado(),
             "configurar_inicio" => self.configurar_inicio(ler(dados)?),
+            "inicio_copias" => {
+                if usuarios::quantidade(&self.banco.conn)? > 0 {
+                    return Ok(json!([]));
+                }
+                let pasta = backup::pasta_padrao(self.banco.caminho.as_deref());
+                Ok(json!(backup::listar(&pasta).into_iter().filter(|c| !c.antes).collect::<Vec<_>>()))
+            }
+            "inicio_restaurar" => {
+                if usuarios::quantidade(&self.banco.conn)? > 0 {
+                    return Err(Erro::validacao(
+                        "Este computador já tem uma loja configurada. Para restaurar, use Configurações › Backup.",
+                    ));
+                }
+                let d: Restaurar = ler(dados)?;
+                let pasta = backup::pasta_padrao(self.banco.caminho.as_deref());
+                // Só uma das cópias da pasta de backup deste computador (nunca um caminho qualquer vindo da tela).
+                if d.nuvem || !backup::listar(&pasta).into_iter().any(|c| !c.antes && c.caminho == d.arquivo) {
+                    return Err(Erro::validacao("Essa cópia não está na pasta de backup deste computador."));
+                }
+                let caminho = self.banco.caminho.clone();
+                let r =
+                    backup::restaurar_por(&mut self.banco.conn, caminho.as_deref(), &d.arquivo, false, &d.senha, None);
+                // Como no backup_restaurar: o banco trocado e a restauração pela metade: nada é gravado até reabrir.
+                if r.is_err() && caminho.as_deref().is_some_and(crate::banco::restauracao_pela_metade) {
+                    self.comprometido = true;
+                    self.sessao = None;
+                    self.liberacoes.clear();
+                }
+                let info = r?;
+                self.por_entregar.clear();
+                match crate::operacoes::abrir_sessao(&self.banco.conn) {
+                    Ok(n) => self.abertura = n,
+                    Err(e) => crate::registro::anotar(&format!("PEND-30: abertura depois de restaurar: {e}")),
+                }
+                self.sessao = None;
+                Ok(json!(info))
+            }
             "usuarios_entrada" => {
                 let lista = usuarios::listar(&self.banco.conn, true)?;
                 Ok(json!(lista.into_iter().map(|u| json!({ "id": u.id, "nome": u.nome })).collect::<Vec<_>>()))

@@ -145,6 +145,44 @@ fn restaurar_caindo(l: &Loja, etapa: &'static str) -> Value {
     r
 }
 
+/// E7-7 (PEND-30 (a), decisão do proprietário de 26/11/2026): o Rustinho reinstalado (banco vazio) com as cópias na pasta
+/// de backup deste computador: a primeira tela lista as cópias e restaura a escolhida com a senha de um gerente da cópia.
+/// Só cópias dessa pasta, só sem usuários.
+#[test]
+fn e7_7_banco_vazio_oferece_restaurar_a_copia_da_pasta() {
+    let l = loja("pend30");
+    for sufixo in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{sufixo}", l.db.display()));
+    }
+    let _vez = backup::testes::um_por_vez();
+    let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+    let copias = chamar(&mut s, "inicio_copias", json!({}));
+    let lista = copias["dados"].as_array().cloned().unwrap_or_default();
+    assert!(lista.iter().any(|c| c["caminho"] == json!(l.backup)), "a cópia da pasta aparece: {copias}");
+    // Uma cópia VÁLIDA fora da pasta de backup é recusada (a tela não escolhe arquivo qualquer).
+    let fora_dir = l.pasta.join("outra-pasta");
+    std::fs::create_dir_all(&fora_dir).unwrap();
+    let fora_arq = fora_dir.join(std::path::Path::new(&l.backup).file_name().unwrap());
+    std::fs::copy(&l.backup, &fora_arq).unwrap();
+    let fora =
+        chamar(&mut s, "inicio_restaurar", json!({ "arquivo": fora_arq.display().to_string(), "senha": "12345678" }));
+    assert_eq!(fora["ok"], false, "{fora}");
+    // A senha errada não restaura.
+    let errada = chamar(&mut s, "inicio_restaurar", json!({ "arquivo": l.backup, "senha": "errada00" }));
+    assert_eq!(errada["ok"], false, "{errada}");
+    ok(&mut s, "inicio_restaurar", json!({ "arquivo": l.backup, "senha": "12345678" }));
+    drop(s);
+    assert!(tem_peca(&l.db, "Antes do backup"), "a loja voltou da cópia");
+    // Com usuários: a lista vem vazia, e restaurar por aqui é recusado.
+    let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+    let copias = chamar(&mut s, "inicio_copias", json!({}));
+    assert_eq!(copias["dados"], json!([]), "{copias}");
+    let de_novo = chamar(&mut s, "inicio_restaurar", json!({ "arquivo": l.backup, "senha": "12345678" }));
+    assert_eq!(de_novo["ok"], false, "{de_novo}");
+    drop(s);
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
 /// Sem queda: um registro na auditoria, no banco restaurado, de quem restaurou.
 #[test]
 fn m04_restaurar_registra_na_auditoria_uma_vez() {
