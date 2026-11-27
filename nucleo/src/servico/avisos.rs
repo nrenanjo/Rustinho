@@ -1140,6 +1140,46 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             );
         }
     }
+    // E7-8 (ES-2 (a), decisão do proprietário de 26/11/2026): a gaveta que estava aberta na cópia restaurada volta
+    // aberta; o aviso fica até ela ser fechada (quem fecha confere o dinheiro).
+    if let Some(marca) = config::ler(conn, backup::GAVETA_DA_RESTAURACAO)? {
+        let v: serde_json::Value = serde_json::from_str(&marca).unwrap_or_default();
+        let sessoes: Vec<String> = v["sessoes"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let mut ainda_aberta = false;
+        for id in &sessoes {
+            let aberta: bool = conn
+                .query_row("SELECT fechado_em IS NULL FROM caixa_sessao WHERE id = ?1", [id], |l| l.get(0))
+                .unwrap_or(false);
+            ainda_aberta |= aberta;
+        }
+        if ainda_aberta {
+            let copia = v["copia"].as_str().unwrap_or("");
+            let hora: Option<String> = conn
+                .query_row("SELECT strftime('%d/%m às %H:%M', ?1, 'localtime')", [copia], |l| l.get(0))
+                .ok()
+                .flatten();
+            let mut a = Aviso::simples(
+                "gaveta_da_restauracao",
+                &hoje,
+                "Caixa".into(),
+                match &hora {
+                    Some(h) => format!("Esta gaveta estava aberta na cópia de {h}. Confira o dinheiro e feche."),
+                    None => "Esta gaveta estava aberta na cópia restaurada. Confira o dinheiro e feche.".into(),
+                },
+                String::new(),
+                "caixa",
+            )
+            .categoria(ATENCAO);
+            a.descricao = "A cópia restaurada foi feita com a gaveta aberta. O Rustinho não fecha a gaveta sozinho: \
+                 o dinheiro de agora pode não ser o da cópia. Conte o dinheiro e feche a gaveta pelo caminho de sempre."
+                .into();
+            a.acao = "Ver o caixa".into();
+            avisos.push(a);
+        }
+    }
     // E7-4 (P-10 (a) e a resposta do proprietário de 26/11/2026, perto da meia-noite): a proteção contínua. O Início só
     // avisa quando algo deste caixa passa de 5 minutos sem prova no Drive (no minuto normal do envio, não); com mais de
     // 24 h, crítico. Na tela de Backup o pendente aparece sempre.

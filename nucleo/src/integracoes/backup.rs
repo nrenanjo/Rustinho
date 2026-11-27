@@ -58,6 +58,9 @@ pub const DIAS_PADRAO: i64 = 30;
 /// E7-5 (P-09 (a), decisão do proprietário de 26/11/2026): no Google Drive, as cópias do dia ficam 90 dias (ou mais, se
 /// o ajuste da loja pedir mais). A pasta do computador segue o ajuste.
 pub const DIAS_NO_DRIVE: i64 = 90;
+/// E7-8 (ES-2 (a)): as sessões de caixa deste computador que estavam abertas na cópia restaurada, e de quando é a cópia.
+/// Local (não viaja). O aviso do Início (`avisos::do_dia`) dura enquanto alguma delas continuar aberta.
+pub const GAVETA_DA_RESTAURACAO: &str = "backup_gaveta_da_restauracao";
 /// Horário do backup do dia se ninguém mudar.
 pub const HORA_PADRAO: &str = "18:00";
 /// Cópias mais novas de cada caixa que nunca são apagadas.
@@ -1986,6 +1989,7 @@ pub fn restaurar_por(
     // diz se o banco chegou a ser trocado.
     pendente.troca = tempo::novo_id();
     pendente.auditoria = usuario_id.map(|u| (u.to_string(), info.quando.clone()));
+    pendente.copia_quando = info.quando.clone();
     marcar_banco_que_entra(&db, &pendente.troca)?;
     // D-08: anota ao lado do banco o que é deste computador ANTES de trocar o
     // banco. Se o Rustinho cair no meio, ao abrir de novo termina daqui.
@@ -2146,6 +2150,10 @@ pub struct Pendente {
     /// auditoria vai na transação que termina a restauração.
     #[serde(default)]
     auditoria: Option<(String, String)>,
+    /// E7-8 (ES-2 (a), 0.9.19): de quando é a cópia (para o aviso da gaveta que estava aberta nela). Vazia numa marca
+    /// de versão antiga.
+    #[serde(default)]
+    copia_quando: String,
     /// Protocolo 4 (E5, etapa 6; 0.9.19-dev.2, T009): o registro assinado de caixas
     /// aprovados e retirados de antes da restauração. Volta por `aprovados::juntar`
     /// (acrescenta, nunca tira): restaurar um backup de antes de uma retirada não
@@ -2193,7 +2201,17 @@ impl Pendente {
         let loja = crate::loja::id(conn)?;
         let registro =
             if loja.is_empty() { None } else { Some(crate::troca::protocolo4::aprovados::linhas(conn, &loja)?) };
-        Ok(Pendente { locais, pares, caminhos, seq, loja, troca: String::new(), auditoria: None, registro })
+        Ok(Pendente {
+            locais,
+            pares,
+            caminhos,
+            seq,
+            loja,
+            troca: String::new(),
+            auditoria: None,
+            copia_quando: String::new(),
+            registro,
+        })
     }
 
     /// Depois de uma queda: o banco chegou a ser trocado (a marca de dentro
@@ -2296,6 +2314,23 @@ impl Pendente {
         }
         // QT-1b: o "programa aberto" e as operações em curso da hora do backup não valem para este banco.
         crate::operacoes::depois_de_restaurar(&tx)?;
+        // E7-8 (ES-2 (a), decisão do proprietário de 26/11/2026): a gaveta deste caixa que estava aberta na cópia volta
+        // aberta (nada é fechado sozinho), com o aviso para conferir o dinheiro e fechar. A marca é local (não viaja) e
+        // o aviso some quando a sessão é fechada.
+        let dispositivo = config::ler(&tx, "dispositivo_id")?.unwrap_or_default();
+        let abertas: Vec<String> = tx
+            .prepare("SELECT id FROM caixa_sessao WHERE fechado_em IS NULL AND dispositivo = ?1")?
+            .query_map([&dispositivo], |l| l.get(0))?
+            .collect::<Result<_, _>>()?;
+        if abertas.is_empty() {
+            tx.execute("DELETE FROM config WHERE chave = ?1", [GAVETA_DA_RESTAURACAO])?;
+        } else {
+            config::gravar(
+                &tx,
+                GAVETA_DA_RESTAURACAO,
+                &json!({ "sessoes": abertas, "copia": self.copia_quando }).to_string(),
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -3109,6 +3144,58 @@ pub(crate) mod testes {
         // Um caminho que sobe não é aceito.
         assert!(restaurar(&mut a.conn, Some(&caminho_a), &format!("../{antiga}"), true, "1111").is_err());
         std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// E7-8 (ES-2 (a), decisão de 26/11/2026): restaurada uma cópia feita com a gaveta deste caixa aberta, a gaveta volta
+    /// aberta (nada fecha sozinho) e o Início avisa com a hora da cópia; fechada a gaveta, o aviso some. Cópia com a gaveta
+    /// fechada: sem aviso.
+    #[test]
+    fn e7_8_gaveta_aberta_na_copia_volta_aberta_com_aviso() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("gaveta-restaurada");
+        let caminho = pasta.join("rustinho.db");
+        let mut b = Banco::abrir(&caminho).unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        let abrir_gaveta = |b: &Banco, id: &str| {
+            b.conn
+                .execute(
+                    "INSERT INTO caixa_sessao (id, dispositivo, caixa_nome, aberto_em, valor_inicial)
+                     VALUES (?1, ?2, 'Caixa 1', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 20000)",
+                    params![id, b.dispositivo],
+                )
+                .unwrap();
+        };
+        let aviso =
+            |b: &Banco| crate::avisos::do_dia(&b.conn).unwrap().into_iter().find(|a| a.id == "gaveta_da_restauracao");
+        abrir_gaveta(&b, "sessao-1");
+        let copia = fazer(&caminho, false).unwrap().arquivo;
+        restaurar(&mut b.conn, Some(&caminho), &copia, false, "1111").unwrap();
+        let aberta: bool = b
+            .conn
+            .query_row("SELECT fechado_em IS NULL FROM caixa_sessao WHERE id = 'sessao-1'", [], |l| l.get(0))
+            .unwrap();
+        assert!(aberta, "a gaveta da cópia volta aberta (nada fecha sozinho)");
+        let a = aviso(&b).expect("o aviso da gaveta");
+        assert!(
+            a.texto.contains("Esta gaveta estava aberta na cópia de") && a.texto.contains("Confira o dinheiro e feche"),
+            "{}",
+            a.texto
+        );
+        b.conn
+            .execute(
+                "UPDATE caixa_sessao SET fechado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = 'sessao-1'",
+                [],
+            )
+            .unwrap();
+        assert!(aviso(&b).is_none(), "fechada a gaveta, o aviso some");
+        // Cópia com a gaveta fechada: sem aviso.
+        let copia2 = fazer(&caminho, false).unwrap().arquivo;
+        restaurar(&mut b.conn, Some(&caminho), &copia2, false, "1111").unwrap();
+        assert!(aviso(&b).is_none(), "cópia com a gaveta fechada: sem aviso");
+        drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
     }
 
