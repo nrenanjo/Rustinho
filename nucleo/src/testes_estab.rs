@@ -145,6 +145,65 @@ fn restaurar_caindo(l: &Loja, etapa: &'static str) -> Value {
     r
 }
 
+/// M6 da R1 da 008: segue um dos dois botões da faixa da tela de Backup como a tela faz (a cópia que o resumo dá, pela
+/// restauração de sempre, com a senha de um gerente). Devolve o resumo depois.
+fn seguir_botao(l: &Loja, botao: &str) -> Value {
+    let _vez = backup::testes::um_por_vez();
+    let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+    ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "12345678" }));
+    let antes = ok(&mut s, "backup_ler", json!({}));
+    let c = antes["interrompida"][botao].clone();
+    assert!(c.is_object(), "o botão \"{botao}\" aparece: {}", antes["interrompida"]);
+    let arquivo = if c["nuvem"] == json!(true) { c["nome"].clone() } else { c["caminho"].clone() };
+    ok(&mut s, "backup_restaurar", json!({ "arquivo": arquivo, "nuvem": c["nuvem"], "senha": "12345678" }));
+    drop(s);
+    let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+    ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "12345678" }));
+    ok(&mut s, "backup_ler", json!({}))
+}
+
+/// M6 da R1 da 008 (ES-3 (a)): a restauração caiu ANTES de trocar o banco (os dados são os de antes). A faixa oferece
+/// os dois caminhos; "Tentar de novo" restaura a mesma cópia, e a faixa e o aviso saem.
+#[test]
+fn m6_queda_antes_da_troca_tentar_de_novo() {
+    let l = loja("m6-tentar");
+    restaurar_caindo(&l, "antes_da_troca");
+    drop(crate::banco::Banco::abrir(&l.db).unwrap());
+    assert!(tem_peca(&l.db, "Depois do backup"), "os dados são os de antes");
+    assert_eq!(
+        aviso_da_restauracao(&l.db).as_deref(),
+        Some("A restauração não terminou. Nada foi perdido: os dados de antes estão guardados.")
+    );
+    let depois = seguir_botao(&l, "tentar");
+    assert!(!tem_peca(&l.db, "Depois do backup") && tem_peca(&l.db, "Antes do backup"), "a cópia foi restaurada");
+    assert_eq!(depois["interrompida"], Value::Null, "a faixa saiu");
+    assert_eq!(aviso_da_restauracao(&l.db), None, "o aviso saiu");
+    conferir_banco(&l.db);
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
+/// M6 da R1 da 008 (ES-3 (a)): a restauração caiu DEPOIS de trocar o banco e terminou ao abrir (os dados são os da
+/// cópia). "Voltar aos dados de antes" restaura a cópia de antes, feita no começo da restauração.
+#[test]
+fn m6_queda_depois_da_troca_voltar_aos_dados_de_antes() {
+    let l = loja("m6-voltar");
+    restaurar_caindo(&l, "depois_da_troca");
+    drop(crate::banco::Banco::abrir(&l.db).unwrap());
+    assert!(!tem_peca(&l.db, "Depois do backup"), "terminou ao abrir: os dados são os da cópia");
+    assert_eq!(
+        aviso_da_restauracao(&l.db).as_deref(),
+        Some(
+            "A restauração foi interrompida e terminou ao abrir. Nada foi perdido: os dados de antes estão guardados."
+        )
+    );
+    let depois = seguir_botao(&l, "voltar");
+    assert!(tem_peca(&l.db, "Depois do backup"), "voltaram os dados de antes da restauração");
+    assert_eq!(depois["interrompida"], Value::Null, "a faixa saiu");
+    assert_eq!(aviso_da_restauracao(&l.db), None, "o aviso saiu");
+    conferir_banco(&l.db);
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
 /// E7-7 (PEND-30 (a), decisão do proprietário de 26/11/2026): o Rustinho reinstalado (banco vazio) com as cópias na pasta
 /// de backup deste computador: a primeira tela lista as cópias e restaura a escolhida com a senha de um gerente da cópia.
 /// Só cópias dessa pasta, só sem usuários.
@@ -225,7 +284,10 @@ fn estab_queda_antes_da_troca_nao_finge_restauracao() {
     assert_eq!(ler(&l.db, "codigos_geracao"), codigos, "a faixa de códigos deste caixa continua valendo");
     assert_eq!(restauracoes_na_auditoria(&l.db), 0, "não houve restauração");
     // E7-9: o Início conta, com o texto neutro (nada foi trocado aqui).
-    assert_eq!(aviso_da_restauracao(&l.db).as_deref(), Some("A restauração foi interrompida. Nada foi perdido."));
+    assert_eq!(
+        aviso_da_restauracao(&l.db).as_deref(),
+        Some("A restauração não terminou. Nada foi perdido: os dados de antes estão guardados.")
+    );
     conferir_banco(&l.db);
     let _ = std::fs::remove_dir_all(&l.pasta);
 }
@@ -250,7 +312,9 @@ fn m04_queda_depois_da_troca_termina_e_registra_ao_abrir() {
     // E7-9: o Início conta que ela terminou nesta abertura.
     assert_eq!(
         aviso_da_restauracao(&l.db).as_deref(),
-        Some("A restauração foi interrompida e terminou agora, ao abrir. Nada foi perdido.")
+        Some(
+            "A restauração foi interrompida e terminou ao abrir. Nada foi perdido: os dados de antes estão guardados."
+        )
     );
     conferir_banco(&l.db);
     let _ = std::fs::remove_dir_all(&l.pasta);

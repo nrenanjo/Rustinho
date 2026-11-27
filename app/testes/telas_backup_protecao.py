@@ -4,7 +4,7 @@ Configurações › Backup.
 
 Dois casos, com o Google Drive ligado (backup_nuvem = 1) e sem conexão de verdade com o Google:
 - SEM PROVA: nada do que este caixa fez foi conferido no Drive. A linha diz "pendente", e nunca "em dia";
-- COM PROVA: o cofre diz que tudo está conferido (backup_lote_conferido_ate acima do registro). A linha diz "em dia".
+- COM PROVA: o cofre diz que tudo está conferido (os lotes conferidos de 0 até acima do registro). A linha diz "em dia".
   É também o controle positivo de que a linha muda com a prova, e não é um texto fixo.
 Com o Drive desligado, a linha não aparece (não se fala em proteção sem cofre).
 
@@ -23,6 +23,9 @@ from telas_navegacao_casos import Placar, montar_loja, por_fora, TELA  # noqa: E
 
 PENDENTE = "Proteção contínua: pendente"
 EM_DIA = "Proteção contínua: em dia"
+TENTAR = "Tentar de novo"
+VOLTAR = "Voltar aos dados de antes"
+INTERROMPIDA = "A restauração não terminou. Nada foi perdido: os dados de antes estão guardados."
 
 
 def abrir_backup(placar, pasta, fotos, nome):
@@ -37,7 +40,7 @@ def caso(placar, fotos, nome, sql, deve, nao_deve):
     pasta = tempfile.mkdtemp(prefix=f"rustinho-backup-protecao-{nome}-")
     try:
         montar_loja(pasta)
-        por_fora(pasta, sql)
+        por_fora(pasta, sql.replace("{PASTA}", pasta))
         r = abrir_backup(placar, pasta, fotos, nome)
         try:
             # A tela de Backup aberta (a linha "No computador:" sempre aparece): só então o "não diz" vale.
@@ -48,6 +51,8 @@ def caso(placar, fotos, nome, sql, deve, nao_deve):
             f = r.foto("-1")
             if deve:
                 ok(f"{nome}: a linha diz \"{deve}\"", achou, f)
+            if nome == "interrompida":
+                ok(f"{nome}: os dois botões aparecem", r.tem(TENTAR) and r.tem(VOLTAR), f)
             for t in nao_deve:
                 ok(f"{nome}: a linha não diz \"{t}\"", not r.tem(t), f)
         finally:
@@ -69,10 +74,18 @@ def main():
             ("sem_prova", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_nuvem', '1');",
              PENDENTE, [EM_DIA]),
             ("com_prova", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_nuvem', '1'); "
-                          "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_lote_conferido_ate', '999999999');",
+                          "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_lote_conferido_ate', '999999999'); "
+                          # A1 da R1 da 008: os lotes conferidos cobrem desde o começo do registro.
+                          "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_lote_inicio', '0');",
              EM_DIA, [PENDENTE]),
             ("sem_cofre", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_nuvem', '0');",
-             None, [PENDENTE, EM_DIA]),
+             None, [PENDENTE, EM_DIA, TENTAR, VOLTAR]),
+            # M6 da R1 da 008 (ES-3 (a)): a restauração interrompida mostra os dois botões (o sem_cofre é o controle).
+            ("interrompida", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_restauracao_interrompida', "
+                             "json_object('terminouAgora', json('false'), 'quando', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), "
+                             "'arquivo', '{PASTA}/rustinho.db', 'nuvem', json('false'), "
+                             "'copia', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day'), 'antes', '{PASTA}/rustinho.db'));",
+             INTERROMPIDA, []),
         ]
         for nome, sql, deve, nao_deve in casos:
             try:

@@ -2121,13 +2121,16 @@ pub fn restaurar_por(
     let _pausa = sync::pausar();
 
     // Cópia do que existe agora, por segurança.
+    let mut copia_de_antes = String::new();
     if let Some(c) = caminho_db {
         dizer("Guardando uma cópia de agora…");
         let r = fazer_com(conn, c, true);
         if banco::defeito(c).is_none() {
             anotar(conn, &r)?;
         }
-        r.map_err(|e| Erro::validacao(format!("Não deu para guardar a cópia de antes, então nada foi mudado. {e}")))?;
+        copia_de_antes = r
+            .map_err(|e| Erro::validacao(format!("Não deu para guardar a cópia de antes, então nada foi mudado. {e}")))?
+            .arquivo;
     }
 
     // O que é deste computador fica como está.
@@ -2139,6 +2142,9 @@ pub fn restaurar_por(
     pendente.auditoria = usuario_id.map(|u| (u.to_string(), info.quando.clone()));
     pendente.copia_quando = info.quando.clone();
     pendente.copia_dispositivo = info.dispositivo.clone();
+    pendente.arquivo = arquivo.to_string();
+    pendente.nuvem = nuvem;
+    pendente.antes = copia_de_antes;
     marcar_banco_que_entra(&db, &pendente.troca)?;
     // D-08: anota ao lado do banco o que é deste computador ANTES de trocar o
     // banco. Se o Rustinho cair no meio, ao abrir de novo termina daqui.
@@ -2307,6 +2313,14 @@ pub struct Pendente {
     /// computador, como na reinstalação da PEND-30). Vazio numa marca de versão antiga.
     #[serde(default)]
     copia_dispositivo: String,
+    /// M6 da R1 da 008 (ES-3 (a)): o que estava sendo restaurado (para "Tentar de novo") e a cópia de antes, feita por
+    /// segurança no começo (para "Voltar aos dados de antes"). Vazios numa marca de versão antiga.
+    #[serde(default)]
+    arquivo: String,
+    #[serde(default)]
+    nuvem: bool,
+    #[serde(default)]
+    antes: String,
     /// Protocolo 4 (E5, etapa 6; 0.9.19-dev.2, T009): o registro assinado de caixas
     /// aprovados e retirados de antes da restauração. Volta por `aprovados::juntar`
     /// (acrescenta, nunca tira): restaurar um backup de antes de uma retirada não
@@ -2364,6 +2378,9 @@ impl Pendente {
             auditoria: None,
             copia_quando: String::new(),
             copia_dispositivo: String::new(),
+            arquivo: String::new(),
+            nuvem: false,
+            antes: String::new(),
             registro,
         })
     }
@@ -2501,6 +2518,8 @@ impl Pendente {
                 .to_string(),
             )?;
         }
+        // M6 da R1 da 008: uma restauração que termina resolve a interrompida de antes (o aviso e os botões saem).
+        tx.execute("DELETE FROM config WHERE chave = ?1", [RESTAURACAO_INTERROMPIDA])?;
         tx.commit()?;
         Ok(())
     }
@@ -2515,6 +2534,7 @@ pub fn terminar_restauracao_pela_metade(conn: &mut Connection, caminho_db: &Path
     // trocado), e o Início avisa (`RESTAURACAO_INTERROMPIDA`). `terminou_agora`: o Rustinho terminou a restauração nesta
     // abertura. Nos outros casos (nada trocado, ou já tinha terminado antes de a marca sair) o texto é o neutro.
     let mut terminou_agora = false;
+    let lida = serde_json::from_str::<Pendente>(&texto).ok();
     match serde_json::from_str::<Pendente>(&texto) {
         // 0.9.18: a marca de dentro do banco não é a desta restauração — ou
         // ele não chegou a ser trocado (o banco é o de antes, inteiro), ou a
@@ -2539,10 +2559,59 @@ pub fn terminar_restauracao_pela_metade(conn: &mut Connection, caminho_db: &Path
     config::gravar(
         conn,
         RESTAURACAO_INTERROMPIDA,
-        &json!({ "terminouAgora": terminou_agora, "quando": tempo::agora() }).to_string(),
+        &json!({
+            "terminouAgora": terminou_agora,
+            "quando": tempo::agora(),
+            "arquivo": lida.as_ref().map(|p| p.arquivo.clone()).unwrap_or_default(),
+            "nuvem": lida.as_ref().is_some_and(|p| p.nuvem),
+            "copia": lida.as_ref().map(|p| p.copia_quando.clone()).unwrap_or_default(),
+            "antes": lida.as_ref().map(|p| p.antes.clone()).unwrap_or_default(),
+        })
+        .to_string(),
     )?;
     let _ = std::fs::remove_file(&marca);
     Ok(true)
+}
+
+/// M6 da R1 da 008 (ES-3 (a)): os dois caminhos depois de uma restauração interrompida (até 3 dias), no formato das
+/// cópias da lista (a tela confirma e pede a senha de um gerente como em qualquer restauração):
+/// - "tentar": a mesma cópia de novo;
+/// - "voltar": a cópia de antes, feita por segurança no começo da restauração.
+/// Cada um só aparece se o arquivo existe (a cópia da nuvem, pelo nome).
+fn restauracao_interrompida(conn: &Connection) -> Resultado<Value> {
+    let Some(marca) = config::ler(conn, RESTAURACAO_INTERROMPIDA)? else { return Ok(Value::Null) };
+    let v: Value = serde_json::from_str(&marca).unwrap_or_default();
+    let quando = v["quando"].as_str().unwrap_or("");
+    let recente: bool = conn
+        .query_row("SELECT julianday('now') - julianday(?1) <= 3", [quando], |l| l.get::<_, Option<bool>>(0))?
+        .unwrap_or(false);
+    if !recente {
+        return Ok(Value::Null);
+    }
+    let hora = |iso: &str| -> String {
+        conn.query_row("SELECT strftime('%d/%m/%Y às %H:%M', ?1, 'localtime')", [iso], |l| {
+            l.get::<_, Option<String>>(0)
+        })
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+    };
+    let arquivo = v["arquivo"].as_str().unwrap_or("");
+    let nuvem = v["nuvem"].as_bool().unwrap_or(false);
+    let tentar = if arquivo.is_empty() || (!nuvem && !Path::new(arquivo).is_file()) {
+        Value::Null
+    } else if nuvem {
+        json!({ "nuvem": true, "nome": arquivo, "caminho": "", "quando": hora(v["copia"].as_str().unwrap_or("")) })
+    } else {
+        json!({ "nuvem": false, "nome": "", "caminho": arquivo, "quando": hora(v["copia"].as_str().unwrap_or("")) })
+    };
+    let antes = v["antes"].as_str().unwrap_or("");
+    let voltar = if antes.is_empty() || !Path::new(antes).is_file() {
+        Value::Null
+    } else {
+        json!({ "nuvem": false, "nome": "", "caminho": antes, "quando": hora(quando) })
+    };
+    Ok(json!({ "terminouAgora": v["terminouAgora"].as_bool().unwrap_or(false), "tentar": tentar, "voltar": voltar }))
 }
 
 /// Resumo para a tela.
@@ -2554,7 +2623,9 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
     // A2 da R1 da 008: a credencial venceu (na cópia do dia ou no cofre): a tela oferece "Reconectar".
     let lote_erro = config::ler(conn, cofre::LOTE_ERRO)?.unwrap_or_default();
     let reconectar = drive && (credencial_vencida(&s.nuvem_erro) || credencial_vencida(&lote_erro));
+    let interrompida = restauracao_interrompida(conn)?;
     Ok(json!({
+        "interrompida": interrompida,
         "pasta": a.pasta.display().to_string(),
         "pastaPadrao": pasta_padrao(caminho_db).display().to_string(),
         "dias": a.dias.to_string(),

@@ -240,6 +240,39 @@ ColumnLayout {
         }
     }
 
+    // ---------------- Restauração interrompida ----------------
+    // M6 da R1 da 008 (ES-3 (a), decisão do proprietário de 26/11/2026): os dois
+    // caminhos, pela confirmação e pela senha de um gerente de sempre.
+    Faixa {
+        objectName: "faixaRestauracaoInterrompida"
+        visible: !!secao.b && !!secao.b.interrompida
+        titulo: "A restauração parou no meio"
+        color: Tema.rosa
+        Layout.fillWidth: true
+        Nota {
+            text: secao.b && secao.b.interrompida && secao.b.interrompida.terminouAgora
+                  ? "A restauração foi interrompida e terminou ao abrir. Nada foi perdido: os dados de antes estão guardados."
+                  : "A restauração não terminou. Nada foi perdido: os dados de antes estão guardados."
+            Layout.fillWidth: true
+        }
+        RowLayout {
+            spacing: 12
+            Botao {
+                text: "Tentar de novo"
+                visible: !!secao.b && !!secao.b.interrompida && !!secao.b.interrompida.tentar
+                enabled: !secao.restaurando
+                onClicked: secao.perguntarRestaurar(secao.b.interrompida.tentar)
+            }
+            Botao {
+                text: "Voltar aos dados de antes"
+                tipo: "secundario"
+                visible: !!secao.b && !!secao.b.interrompida && !!secao.b.interrompida.voltar
+                enabled: !secao.restaurando
+                onClicked: secao.perguntarRestaurar(secao.b.interrompida.voltar)
+            }
+        }
+    }
+
     // ---------------- Como está ----------------
     Faixa {
         readonly property bool comErro: !!secao.b && secao.b.situacao.erro !== ""

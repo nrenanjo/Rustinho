@@ -1157,10 +1157,13 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
                 "restauracao_interrompida",
                 &hoje,
                 "Backup".into(),
+                // M6 da R1 da 008: o texto decidido na ES-3 (a); quando ela terminou ao abrir, o começo diz isso.
                 if terminou {
-                    "A restauração foi interrompida e terminou agora, ao abrir. Nada foi perdido.".into()
+                    "A restauração foi interrompida e terminou ao abrir. Nada foi perdido: os dados de antes estão \
+                     guardados."
+                        .into()
                 } else {
-                    "A restauração foi interrompida. Nada foi perdido.".into()
+                    "A restauração não terminou. Nada foi perdido: os dados de antes estão guardados.".into()
                 },
                 String::new(),
                 "configuracoes",
