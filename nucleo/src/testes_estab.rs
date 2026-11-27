@@ -109,6 +109,12 @@ fn conferir_banco(db: &Path) {
     assert_eq!(chaves, 0, "referência quebrada");
 }
 
+/// E7-9 (ES-3 (a)): o texto do aviso do Início sobre a restauração interrompida, se houver.
+fn aviso_da_restauracao(db: &Path) -> Option<String> {
+    let b = crate::banco::Banco::abrir(db).unwrap();
+    crate::avisos::do_dia(&b.conn).unwrap().into_iter().find(|a| a.id == "restauracao_interrompida").map(|a| a.texto)
+}
+
 fn restauracoes_na_auditoria(db: &Path) -> i64 {
     numero(db, "SELECT COUNT(*) FROM auditoria WHERE acao = 'backup.restaurar'")
 }
@@ -180,6 +186,8 @@ fn estab_queda_antes_da_troca_nao_finge_restauracao() {
     assert_eq!(ler(&l.db, "sync_geracao"), geracao, "a geração da troca de dados não mudou");
     assert_eq!(ler(&l.db, "codigos_geracao"), codigos, "a faixa de códigos deste caixa continua valendo");
     assert_eq!(restauracoes_na_auditoria(&l.db), 0, "não houve restauração");
+    // E7-9: o Início conta, com o texto neutro (nada foi trocado aqui).
+    assert_eq!(aviso_da_restauracao(&l.db).as_deref(), Some("A restauração foi interrompida. Nada foi perdido."));
     conferir_banco(&l.db);
     let _ = std::fs::remove_dir_all(&l.pasta);
 }
@@ -201,6 +209,11 @@ fn m04_queda_depois_da_troca_termina_e_registra_ao_abrir() {
     assert_ne!(ler(&l.db, "sync_geracao"), geracao);
     assert_eq!(restauracoes_na_auditoria(&l.db), 1, "a restauração ficou registrada (uma vez)");
     assert!(ler(&l.db, "restauracao_troca").is_none(), "a marca de dentro do banco saiu");
+    // E7-9: o Início conta que ela terminou nesta abertura.
+    assert_eq!(
+        aviso_da_restauracao(&l.db).as_deref(),
+        Some("A restauração foi interrompida e terminou agora, ao abrir. Nada foi perdido.")
+    );
     conferir_banco(&l.db);
     let _ = std::fs::remove_dir_all(&l.pasta);
 }

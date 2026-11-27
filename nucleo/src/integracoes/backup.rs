@@ -61,6 +61,8 @@ pub const DIAS_NO_DRIVE: i64 = 90;
 /// E7-8 (ES-2 (a)): as sessões de caixa deste computador que estavam abertas na cópia restaurada, e de quando é a cópia.
 /// Local (não viaja). O aviso do Início (`avisos::do_dia`) dura enquanto alguma delas continuar aberta.
 pub const GAVETA_DA_RESTAURACAO: &str = "backup_gaveta_da_restauracao";
+/// E7-9 (ES-3 (a)): uma restauração que caiu no meio foi resolvida nesta abertura (local; o aviso do Início dura 3 dias).
+pub const RESTAURACAO_INTERROMPIDA: &str = "backup_restauracao_interrompida";
 /// Horário do backup do dia se ninguém mudar.
 pub const HORA_PADRAO: &str = "18:00";
 /// Cópias mais novas de cada caixa que nunca são apagadas.
@@ -2341,6 +2343,10 @@ impl Pendente {
 pub fn terminar_restauracao_pela_metade(conn: &mut Connection, caminho_db: &Path) -> Resultado<bool> {
     let marca = marca_da_restauracao(caminho_db);
     let Ok(texto) = std::fs::read_to_string(&marca) else { return Ok(false) };
+    // E7-9 (ES-3 (a), decisão do proprietário de 26/11/2026): a loja nunca abre pela metade (o D-08 termina, ou nada foi
+    // trocado), e o Início avisa (`RESTAURACAO_INTERROMPIDA`). `terminou_agora`: o Rustinho terminou a restauração nesta
+    // abertura. Nos outros casos (nada trocado, ou já tinha terminado antes de a marca sair) o texto é o neutro.
+    let mut terminou_agora = false;
     match serde_json::from_str::<Pendente>(&texto) {
         // 0.9.18: a marca de dentro do banco não é a desta restauração — ou
         // ele não chegou a ser trocado (o banco é o de antes, inteiro), ou a
@@ -2355,12 +2361,18 @@ pub fn terminar_restauracao_pela_metade(conn: &mut Connection, caminho_db: &Path
         Ok(p) => {
             sync::criar_gatilhos(conn)?;
             p.aplicar(conn)?;
+            terminou_agora = true;
             crate::registro::anotar("restauração interrompida: terminada ao abrir");
         }
         // Marca estragada (caiu enquanto ela era gravada): o banco ainda não
         // tinha sido trocado, então não há o que terminar.
         Err(_) => crate::registro::anotar("restauração interrompida antes de começar: nada a terminar"),
     }
+    config::gravar(
+        conn,
+        RESTAURACAO_INTERROMPIDA,
+        &json!({ "terminouAgora": terminou_agora, "quando": tempo::agora() }).to_string(),
+    )?;
     let _ = std::fs::remove_file(&marca);
     Ok(true)
 }

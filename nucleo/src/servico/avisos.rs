@@ -181,6 +181,7 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
             "backup"
             | "backup_nuvem"
             | "backup_protecao"
+            | "restauracao_interrompida"
             | "backup_sem_tranca"
             | "backup_chave_nao_confirmada"
             | "banco_defeito" => "Ver backup",
@@ -1138,6 +1139,40 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
                 .categoria(ATENCAO)
                 .secao("backup"),
             );
+        }
+    }
+    // E7-9 (ES-3 (a), decisão do proprietário de 26/11/2026): a restauração que caiu no meio. A loja não abre pela metade
+    // (o D-08); o aviso diz o que aconteceu e onde restaurar de novo ou voltar à cópia de antes. Dura 3 dias.
+    if let Some(marca) = config::ler(conn, backup::RESTAURACAO_INTERROMPIDA)? {
+        let v: serde_json::Value = serde_json::from_str(&marca).unwrap_or_default();
+        let quando = v["quando"].as_str().unwrap_or("");
+        let recente: bool = conn
+            .query_row("SELECT julianday('now') - julianday(?1) <= 3", [quando], |l| l.get::<_, Option<bool>>(0))
+            .ok()
+            .flatten()
+            .unwrap_or(false);
+        if recente {
+            let terminou = v["terminouAgora"].as_bool().unwrap_or(false);
+            let mut a = Aviso::simples(
+                "restauracao_interrompida",
+                &hoje,
+                "Backup".into(),
+                if terminou {
+                    "A restauração foi interrompida e terminou agora, ao abrir. Nada foi perdido.".into()
+                } else {
+                    "A restauração foi interrompida. Nada foi perdido.".into()
+                },
+                String::new(),
+                "configuracoes",
+            )
+            .categoria(ATENCAO)
+            .secao("backup");
+            a.descricao =
+                "A restauração parou no meio (falta de luz ou o Rustinho fechou). O Rustinho não abre a loja \
+                 pela metade, e os dados de antes estão guardados na cópia de antes da restauração. Confira os dados: \
+                 em Configurações › Backup dá para tentar de novo ou voltar aos dados de antes."
+                    .into();
+            avisos.push(a);
         }
     }
     // E7-8 (ES-2 (a), decisão do proprietário de 26/11/2026): a gaveta que estava aberta na cópia restaurada volta
