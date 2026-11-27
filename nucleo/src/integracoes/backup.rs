@@ -1567,7 +1567,11 @@ fn explicar_rclone(erro: &str) -> String {
     {
         "O Google Drive não está conectado neste computador.".into()
     } else if e.contains("token") && (e.contains("expired") || e.contains("invalid") || e.contains("revoked")) {
-        "A conexão com o Google Drive venceu. Clique em \"Conectar ao Google Drive\" de novo.".into()
+        // E7-6 (12.1-c (a), decisão de 26/11/2026): só o gerente reconecta. As vendas continuam, e o que este caixa fez
+        // espera na fila (o cofre) até a conexão voltar.
+        "A conexão com o Google Drive venceu. Um gerente precisa conectar de novo, em Configurações › Backup. As \
+         vendas continuam normalmente, e nada se perde: o Rustinho manda tudo quando a conexão voltar."
+            .into()
     } else if e.contains("quota") || (e.contains("storage") && e.contains("exceeded")) {
         "O Google Drive está cheio.".into()
     } else if e.contains("no such host") || e.contains("dial tcp") || e.contains("network") || e.contains("timeout") {
@@ -3106,6 +3110,18 @@ pub(crate) mod testes {
         assert!(restaurar(&mut a.conn, Some(&caminho_a), &format!("../{antiga}"), true, "1111").is_err());
         std::env::remove_var("RUSTINHO_REMOTO");
         let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// E7-6 (12.1-c (a)): a credencial do Google vencida (a mensagem real do Google, "invalid_grant") diz que um gerente
+    /// reconecta, onde, e que as vendas continuam.
+    #[test]
+    fn e7_6_credencial_vencida_diz_que_o_gerente_reconecta() {
+        let real = "Failed to create file system: couldn't fetch token - maybe it has expired? - refresh with \
+                    \"rclone config reconnect rustinho-drive:\": oauth2: cannot fetch token: 400 Bad Request\n\
+                    Response: {\"error\": \"invalid_grant\", \"error_description\": \"Token has been expired or revoked.\"}";
+        let t = explicar_rclone(real);
+        assert!(t.contains("Um gerente precisa conectar de novo"), "{t}");
+        assert!(t.contains("Configurações › Backup") && t.contains("vendas continuam"), "{t}");
     }
 
     /// E7-5 (P-09 (a), decisão de 26/11/2026): no Drive, as cópias do dia ficam 90 dias, mesmo com o ajuste da loja em
