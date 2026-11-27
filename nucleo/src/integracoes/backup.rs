@@ -55,6 +55,9 @@ pub const REMOTO: &str = "rustinho-drive";
 const PASTA_NUVEM: &str = "Rustinho Backup";
 /// Dias guardados se ninguém mudar.
 pub const DIAS_PADRAO: i64 = 30;
+/// E7-5 (P-09 (a), decisão do proprietário de 26/11/2026): no Google Drive, as cópias do dia ficam 90 dias (ou mais, se
+/// o ajuste da loja pedir mais). A pasta do computador segue o ajuste.
+pub const DIAS_NO_DRIVE: i64 = 90;
 /// Horário do backup do dia se ninguém mudar.
 pub const HORA_PADRAO: &str = "18:00";
 /// Cópias mais novas de cada caixa que nunca são apagadas.
@@ -1786,7 +1789,8 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
         // T097 (N2 da 3ª conferência): o Drive com a mesma trava da pasta (T092): sem a chave confirmada por um
         // gerente neste caixa, nenhuma cópia antiga sai (podem ser as únicas que abrem).
         let confirmada = chave_confirmada(conn)?;
-        let apagar = if confirmada { apagar_no_drive(&nomes, &minhas, &hoje, a.dias) } else { Vec::new() };
+        let dias_no_drive = a.dias.max(DIAS_NO_DRIVE);
+        let apagar = if confirmada { apagar_no_drive(&nomes, &minhas, &hoje, dias_no_drive) } else { Vec::new() };
         for velho in apagar {
             // Se não deu para apagar agora, continua na lista: tenta de novo
             // no próximo envio.
@@ -1804,7 +1808,7 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
             if let Ok(la_raiz) = nomes_na_nuvem(&base_nuvem()) {
                 let raiz: Vec<String> = la_raiz.into_iter().map(|x| x.0).collect();
                 let mut ficam = antigas.clone();
-                for velho in apagar_no_drive(&raiz, &antigas, &hoje, a.dias) {
+                for velho in apagar_no_drive(&raiz, &antigas, &hoje, dias_no_drive) {
                     if rclone(&["deletefile", &format!("{}/{velho}", base_nuvem())], Duration::from_secs(60)).is_ok() {
                         ficam.retain(|n| *n != velho);
                     }
@@ -3102,6 +3106,49 @@ pub(crate) mod testes {
         assert!(restaurar(&mut a.conn, Some(&caminho_a), &format!("../{antiga}"), true, "1111").is_err());
         std::env::remove_var("RUSTINHO_REMOTO");
         let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// E7-5 (P-09 (a), decisão de 26/11/2026): no Drive, as cópias do dia ficam 90 dias, mesmo com o ajuste da loja em
+    /// 7 (a pasta do computador segue o ajuste). Com 7 dias, a de 60 dias saía.
+    #[test]
+    fn e7_5_no_drive_as_copias_ficam_90_dias() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste da nuvem pulado");
+            return;
+        }
+        let pasta = pasta_teste("nuvem-90-dias");
+        let nuvem = pasta.join("drive");
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "loja_id", "0193dddd-dddd-7ddd-dddd-dddddddddddd").unwrap();
+        config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+        config::gravar(&b.conn, "backup_dias", "7").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        let destino = pasta_do_caixa(&b.conn).unwrap().unwrap();
+        std::fs::create_dir_all(&destino).unwrap();
+        let disp: String = b.dispositivo.chars().filter(char::is_ascii_alphanumeric).take(8).collect();
+        let dia = |n: i64| -> String {
+            b.conn
+                .query_row(&format!("SELECT strftime('%Y%m%d', 'now', 'localtime', '-{n} days')"), [], |l| l.get(0))
+                .unwrap()
+        };
+        let nome = |n: i64| format!("rustinho-{}-120000-{disp}.{EXTENSAO}", dia(n));
+        let antigas: Vec<String> = [100, 95, 60, 59, 58].iter().map(|n| nome(*n)).collect();
+        for n in &antigas {
+            std::fs::write(Path::new(&destino).join(n), b"x").unwrap();
+        }
+        config::gravar(&b.conn, ENVIADAS_NA_PASTA, &antigas.join("\n")).unwrap();
+        fazer(&caminho, false).unwrap();
+        enviar_pendentes(&b.conn, &caminho).unwrap();
+        let ficaram: Vec<String> = nomes_na_nuvem(&destino).unwrap().into_iter().map(|x| x.0).collect();
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+        assert!(ficaram.contains(&nome(60)), "a de 60 dias fica no Drive (90 dias): {ficaram:?}");
+        assert!(!ficaram.contains(&nome(100)), "a de 100 dias sai: {ficaram:?}");
     }
 
     /// 0.9.18: a retenção do Drive só vale para o que este computador mandou.
