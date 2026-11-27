@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import rustinho
 
@@ -15,6 +16,22 @@ FocusScope {
     property var copias: []
     // B7 da R1 da 008: a cópia escolhida (a mais nova; dá para escolher outra se ela não abrir).
     property int escolhida: 0
+    // B5 da R2 da 008: sem o Google Drive na Beta, o pen drive é a recuperação de um computador perdido. A pasta
+    // escolhida pelo seletor do sistema ("" = a pasta de backup padrão deste computador).
+    property string pastaDasCopias: ""
+
+    function procurarEmOutraPasta(url) {
+        const pasta = Api.caminho(url.toString())
+        const r = Api.chamar("inicio_copias", { pasta: pasta })
+        if (!r.ok || !Array.isArray(r.dados) || r.dados.length === 0) {
+            janela.avisar("Nenhuma cópia do Rustinho nessa pasta.", "erro")
+            return
+        }
+        copias = r.dados
+        pastaDasCopias = pasta
+        escolhida = 0
+        painelRestaurar.open()
+    }
     Component.onCompleted: {
         const r = Api.chamar("inicio_copias", {})
         copias = r.ok && Array.isArray(r.dados) ? r.dados : []
@@ -23,7 +40,7 @@ FocusScope {
     function restaurarCopia() {
         senhaCopia.erro = ""
         const c = copias[escolhida]
-        Api.chamarDemorado("inicio_restaurar", { arquivo: c.caminho, senha: senhaCopia.texto }, "Restaurando a loja…", r => {
+        Api.chamarDemorado("inicio_restaurar", { arquivo: c.caminho, senha: senhaCopia.texto, pasta: pastaDasCopias }, "Restaurando a loja…", r => {
             if (r.ok) {
                 painelRestaurar.close()
                 janela.avisar("A loja foi restaurada da cópia de " + c.quando + ". Entre com o seu usuário.", "ok")
@@ -120,6 +137,14 @@ FocusScope {
                 }
             }
 
+            // B5 da R2 da 008: a cópia num pen drive ou noutra pasta (o seletor do sistema).
+            Botao {
+                objectName: "restaurarDeOutraPasta"
+                text: "Restaurar de um pen drive ou outra pasta"
+                tipo: "discreto"
+                onClicked: escolherPastaDasCopias.open()
+            }
+
             Faixa {
                 titulo: "A loja"
                 color: Tema.pergaminho
@@ -191,6 +216,12 @@ FocusScope {
     }
 
     StackView.onActivated: loja.focarSempre()
+
+    FolderDialog {
+        id: escolherPastaDasCopias
+        title: "Onde está a cópia da loja (pen drive ou outra pasta)"
+        onAccepted: tela.procurarEmOutraPasta(selectedFolder)
+    }
 
     // PEND-30: a senha de um gerente da loja da cópia (a cópia sai trancada com a chave da loja).
     Painel {

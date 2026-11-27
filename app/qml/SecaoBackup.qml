@@ -252,6 +252,8 @@ ColumnLayout {
         Nota {
             text: secao.b && secao.b.interrompida && secao.b.interrompida.terminouAgora
                   ? "A restauração foi interrompida e terminou ao abrir. Nada foi perdido: os dados de antes estão guardados."
+                    + (secao.b.interrompida.voltar ? " Voltar aos dados de antes desfaz o que foi feito depois de "
+                                                      + secao.b.interrompida.voltar.quando + "." : "")
                   : "A restauração não terminou. Nada foi perdido: os dados de antes estão guardados."
             Layout.fillWidth: true
         }

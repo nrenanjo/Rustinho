@@ -116,6 +116,10 @@ def sem_copia(placar, fotos):
             f = r.foto("-1")
             if ok("CONTROLE: a primeira tela abriu", abriu, f):
                 ok("CONTROLE: sem cópia na pasta, não oferece restaurar", not r.tem(FAIXA), f)
+                # B5 da R2 da 008: sem cópia na pasta padrão, ainda dá para procurar num pen drive (o seletor do
+                # sistema, que a tela virtual não dirige: o caminho da pasta escolhida é provado no núcleo).
+                ok("sem cópia, oferece procurar num pen drive ou outra pasta",
+                   r.tem("Restaurar de um pen drive ou outra pasta"), f)
         finally:
             r.fechar()
     finally:

@@ -1214,7 +1214,14 @@ impl Servico {
                 if usuarios::quantidade(&self.banco.conn)? > 0 {
                     return Ok(json!([]));
                 }
-                let pasta = backup::pasta_padrao(self.banco.caminho.as_deref());
+                // B5 da R2 da 008: sem o Google Drive na Beta, o pen drive é a recuperação de um computador perdido. A
+                // pasta pode vir do seletor do sistema; a lista é só das cópias do Rustinho nela.
+                let d: PastaDasCopias = ler(dados).unwrap_or_default();
+                let pasta = if d.pasta.trim().is_empty() {
+                    backup::pasta_padrao(self.banco.caminho.as_deref())
+                } else {
+                    std::path::PathBuf::from(crate::arquivos::caminho_local(d.pasta.trim()))
+                };
                 Ok(json!(backup::listar(&pasta).into_iter().filter(|c| !c.antes).collect::<Vec<_>>()))
             }
             "inicio_restaurar" => {
@@ -1245,10 +1252,14 @@ impl Servico {
                     }
                 }
                 let d: Restaurar = ler(dados)?;
-                let pasta = backup::pasta_padrao(self.banco.caminho.as_deref());
+                let pasta = if d.pasta.trim().is_empty() {
+                    backup::pasta_padrao(self.banco.caminho.as_deref())
+                } else {
+                    std::path::PathBuf::from(crate::arquivos::caminho_local(d.pasta.trim()))
+                };
                 // Só uma das cópias da pasta de backup deste computador (nunca um caminho qualquer vindo da tela).
                 if d.nuvem || !backup::listar(&pasta).into_iter().any(|c| !c.antes && c.caminho == d.arquivo) {
-                    return Err(Erro::validacao("Essa cópia não está na pasta de backup deste computador."));
+                    return Err(Erro::validacao("Essa cópia não está na pasta escolhida."));
                 }
                 let caminho = self.banco.caminho.clone();
                 let r =
@@ -3462,6 +3473,17 @@ struct Restaurar {
     nuvem: bool,
     #[serde(default)]
     senha: String,
+    /// B5 da R2 da 008 (só na primeira tela): a pasta escolhida pelo seletor do sistema (um pen drive). Vazia: a pasta
+    /// de backup padrão deste computador.
+    #[serde(default)]
+    pasta: String,
+}
+
+/// B5 da R2 da 008: a pasta onde a primeira tela procura as cópias.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct PastaDasCopias {
+    pasta: String,
 }
 
 /// Data e hora para nome de arquivo ("20261015-153012").

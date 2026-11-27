@@ -182,6 +182,25 @@ fn m6_queda_antes_da_troca_tentar_de_novo() {
     let _ = std::fs::remove_dir_all(&l.pasta);
 }
 
+/// M1 da R2 da 008: a restauração caiu ANTES de trocar o banco e o caixa continuou trabalhando (uma peça nova). A
+/// faixa NÃO oferece "Voltar aos dados de antes": a cópia do começo desfaria a peça nova (o caso da sonda do revisor).
+#[test]
+fn m1_r2_queda_antes_da_troca_nao_oferece_voltar() {
+    let l = loja("m1-r2-sem-voltar");
+    restaurar_caindo(&l, "antes_da_troca");
+    drop(crate::banco::Banco::abrir(&l.db).unwrap());
+    let _vez = backup::testes::um_por_vez();
+    let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+    ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "12345678" }));
+    peca(&mut s, "Peça depois da queda");
+    let r = ok(&mut s, "backup_ler", json!({}));
+    assert!(r["interrompida"]["tentar"].is_object(), "{}", r["interrompida"]);
+    assert_eq!(r["interrompida"]["voltar"], Value::Null, "sem troca, não oferece voltar: {}", r["interrompida"]);
+    drop(s);
+    assert!(tem_peca(&l.db, "Peça depois da queda"));
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
 /// M6 da R1 da 008 (ES-3 (a)): a restauração caiu DEPOIS de trocar o banco e terminou ao abrir (os dados são os da
 /// cópia). "Voltar aos dados de antes" restaura a cópia de antes, feita no começo da restauração.
 #[test]
@@ -196,6 +215,18 @@ fn m6_queda_depois_da_troca_voltar_aos_dados_de_antes() {
             "A restauração foi interrompida e terminou ao abrir. Nada foi perdido: os dados de antes estão guardados."
         )
     );
+    // M1 da R2: a hora mostrada é a da cópia de antes (o nome dela), e não a da reabertura.
+    {
+        let _vez = backup::testes::um_por_vez();
+        let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+        ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "12345678" }));
+        let v = ok(&mut s, "backup_ler", json!({}))["interrompida"]["voltar"].clone();
+        let nome =
+            std::path::Path::new(v["caminho"].as_str().unwrap()).file_name().unwrap().to_string_lossy().to_string();
+        let (dia, hora) = (&nome[9..17], &nome[18..24]);
+        let esperado = format!("{}/{}/{} {}:{}", &dia[6..8], &dia[4..6], &dia[..4], &hora[..2], &hora[2..4]);
+        assert_eq!(v["quando"], json!(esperado), "{v}");
+    }
     let depois = seguir_botao(&l, "voltar");
     assert!(tem_peca(&l.db, "Depois do backup"), "voltaram os dados de antes da restauração");
     assert_eq!(depois["interrompida"], Value::Null, "a faixa saiu");
@@ -275,6 +306,37 @@ fn b5_inicio_restaurar_guarda_e_tentativas() {
     assert!(r.to_string().contains("Muitas senhas erradas"), "{r}");
     assert!(!tem_peca(&l.db, "Antes do backup"), "nada foi restaurado");
     drop(s);
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
+/// B5 da R2 da 008: sem o Google Drive na Beta, a recuperação de um computador perdido é o pen drive. A primeira tela
+/// procura as cópias numa pasta escolhida e restaura de lá; a cópia de fora da pasta escolhida continua recusada.
+#[test]
+fn b5_r2_primeira_tela_restaura_do_pen_drive() {
+    let l = loja("b5-r2-pen-drive");
+    let pen = l.pasta.join("pen-drive");
+    std::fs::create_dir_all(&pen).unwrap();
+    let no_pen = pen.join(std::path::Path::new(&l.backup).file_name().unwrap());
+    std::fs::rename(&l.backup, &no_pen).unwrap();
+    for sufixo in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{sufixo}", l.db.display()));
+    }
+    let _vez = backup::testes::um_por_vez();
+    let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+    assert_eq!(ok(&mut s, "inicio_copias", json!({})), json!([]), "a pasta padrão não tem a cópia");
+    let no_pen_txt = no_pen.display().to_string();
+    let lista = ok(&mut s, "inicio_copias", json!({ "pasta": pen.display().to_string() }));
+    assert!(lista.as_array().unwrap().iter().any(|c| c["caminho"] == json!(no_pen_txt)), "{lista}");
+    // Controle: a mesma cópia sem dizer a pasta (a pasta padrão) é recusada.
+    let fora = chamar(&mut s, "inicio_restaurar", json!({ "arquivo": no_pen_txt, "senha": "12345678" }));
+    assert_eq!(fora["ok"], false, "{fora}");
+    ok(
+        &mut s,
+        "inicio_restaurar",
+        json!({ "arquivo": no_pen_txt, "senha": "12345678", "pasta": pen.display().to_string() }),
+    );
+    drop(s);
+    assert!(tem_peca(&l.db, "Antes do backup"), "a loja voltou da cópia do pen drive");
     let _ = std::fs::remove_dir_all(&l.pasta);
 }
 

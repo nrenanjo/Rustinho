@@ -1161,7 +1161,9 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     // M1 da R1 da 008: o que a cópia TEM deste computador é o `MAX(seq)` lido NA FOTO (e não a hora do nome, gravado
     // depois do zip: o que entrasse no meio contaria como coberto sem estar na cópia).
     // A cópia de um banco com defeito é só para o suporte: nunca conta como proteção, e nada é gravado nele (A3).
-    let seq_da_foto: Option<i64> = if copia_bruta || defeito_na_origem.is_some() {
+    // B1 da R2: também o banco marcado com defeito por outra conferência (o modo seguro), mesmo com o `quick_check` bom.
+    let seq_da_foto: Option<i64> = if copia_bruta || defeito_na_origem.is_some() || banco::defeito(caminho_db).is_some()
+    {
         None
     } else {
         Connection::open_with_flags(&foto, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok().and_then(|f| {
@@ -2666,11 +2668,16 @@ fn restauracao_interrompida(conn: &Connection) -> Resultado<Value> {
     } else {
         json!({ "nuvem": false, "nome": "", "caminho": arquivo, "quando": hora(v["copia"].as_str().unwrap_or("")) })
     };
+    // M1 da R2 da 008: "Voltar aos dados de antes" só quando o banco FOI trocado (a restauração terminou ao abrir).
+    // Sem troca, os dados de agora já são os de antes, e voltar à cópia do começo desfaria o que foi feito depois da
+    // queda. A hora é a da cópia de antes (o nome dela), e não a da reabertura.
+    let terminou = v["terminouAgora"].as_bool().unwrap_or(false);
     let antes = v["antes"].as_str().unwrap_or("");
-    let voltar = if antes.is_empty() || !Path::new(antes).is_file() {
-        Value::Null
-    } else {
-        json!({ "nuvem": false, "nome": "", "caminho": antes, "quando": hora(quando) })
+    let voltar = match Path::new(antes).file_name().and_then(|n| ler_nome(&n.to_string_lossy())) {
+        Some(b) if terminou && Path::new(antes).is_file() => {
+            json!({ "nuvem": false, "nome": "", "caminho": antes, "quando": quando_de(&b) })
+        }
+        _ => Value::Null,
     };
     Ok(json!({ "terminouAgora": v["terminouAgora"].as_bool().unwrap_or(false), "tentar": tentar, "voltar": voltar }))
 }

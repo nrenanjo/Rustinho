@@ -41,6 +41,11 @@ def caso(placar, fotos, nome, sql, deve, nao_deve):
     pasta = tempfile.mkdtemp(prefix=f"rustinho-backup-protecao-{nome}-")
     try:
         montar_loja(pasta)
+        if "{ANTES}" in sql:
+            # A cópia de antes da restauração (só o nome e o arquivo existindo contam para o botão).
+            antes = os.path.join(pasta, "rustinho-20261126-100000-caixa1.rbk")
+            open(antes, "wb").close()
+            sql = sql.replace("{ANTES}", antes)
         por_fora(pasta, sql.replace("{PASTA}", pasta))
         r = abrir_backup(placar, pasta, fotos, nome)
         try:
@@ -53,6 +58,8 @@ def caso(placar, fotos, nome, sql, deve, nao_deve):
             if deve:
                 ok(f"{nome}: a linha diz \"{deve}\"", achou, f)
             if nome == "interrompida":
+                ok(f"{nome}: só \"Tentar de novo\" (sem troca)", r.tem(TENTAR) and not r.tem(VOLTAR), f)
+            if nome == "interrompida_trocada":
                 ok(f"{nome}: os dois botões aparecem", r.tem(TENTAR) and r.tem(VOLTAR), f)
             for t in nao_deve:
                 ok(f"{nome}: a linha não diz \"{t}\"", not r.tem(t), f)
@@ -82,12 +89,19 @@ def main():
              SEM_DRIVE, [PENDENTE, EM_DIA, "Conectar ao Google Drive"]),
             ("sem_cofre", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_nuvem', '0');",
              SEM_DRIVE, [PENDENTE, EM_DIA, TENTAR, VOLTAR]),
-            # M6 da R1 da 008 (ES-3 (a)): a restauração interrompida mostra os dois botões (o sem_cofre é o controle).
+            # M6 da R1 e M1 da R2 da 008 (ES-3 (a)): a restauração interrompida ANTES da troca oferece só "Tentar de
+            # novo" (voltar desfaria o trabalho de depois da queda); DEPOIS da troca (terminou ao abrir), os dois
+            # botões, com a hora da cópia de antes. O sem_cofre é o controle (nenhum botão).
             ("interrompida", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_restauracao_interrompida', "
                              "json_object('terminouAgora', json('false'), 'quando', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), "
                              "'arquivo', '{PASTA}/rustinho.db', 'nuvem', json('false'), "
-                             "'copia', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day'), 'antes', '{PASTA}/rustinho.db'));",
-             INTERROMPIDA, []),
+                             "'copia', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day'), 'antes', '{ANTES}'));",
+             INTERROMPIDA, [VOLTAR]),
+            ("interrompida_trocada", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_restauracao_interrompida', "
+                                     "json_object('terminouAgora', json('true'), 'quando', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), "
+                                     "'arquivo', '{PASTA}/rustinho.db', 'nuvem', json('false'), "
+                                     "'copia', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day'), 'antes', '{ANTES}'));",
+             "desfaz o que foi feito depois de 26/11/2026 10:00", []),
         ]
         for nome, sql, deve, nao_deve in casos:
             try:
