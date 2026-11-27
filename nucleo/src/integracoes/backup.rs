@@ -1083,6 +1083,20 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
             None => return Err(e.into()),
         }
     }
+    // M1 da R1 da 008: o que a cópia TEM deste computador é o `MAX(seq)` lido NA FOTO (e não a hora do nome, gravado
+    // depois do zip: o que entrasse no meio contaria como coberto sem estar na cópia).
+    let seq_da_foto: Option<i64> = if copia_bruta {
+        None
+    } else {
+        Connection::open_with_flags(&foto, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok().and_then(|f| {
+            f.query_row(
+                "SELECT COALESCE(MAX(seq), 0) FROM alteracao WHERE dispositivo = ?1",
+                [config::ler(conn, "dispositivo_id").ok().flatten().unwrap_or_default()],
+                |l| l.get(0),
+            )
+            .ok()
+        })
+    };
     let estrutura: i64 = conn.query_row("PRAGMA user_version", [], |l| l.get(0))?;
     let info = Info {
         versao: crate::VERSAO.into(),
@@ -1141,6 +1155,9 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     }
     std::fs::rename(&parcial, &destino).map_err(|e| erro_pasta(&a.pasta, e))?;
     gravar_pasta(&a.pasta);
+    if let Some(sq) = seq_da_foto {
+        cofre::anotar_seq_da_copia(conn, &nome, sq)?;
+    }
     let tamanho = std::fs::metadata(&destino).map(|m| m.len() as i64).unwrap_or(0);
 
     // 4. Conferir lendo de volta do disco.
@@ -1787,8 +1804,16 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
         config::gravar(
             conn,
             CONFERIDA_NO_DRIVE,
-            &json!({ "nome": nome, "pasta": pasta, "tamanho": daqui.0, "md5": daqui.1, "quando": tempo::agora() })
-                .to_string(),
+            &json!({
+                "nome": nome,
+                "pasta": pasta,
+                "tamanho": daqui.0,
+                "md5": daqui.1,
+                "quando": tempo::agora(),
+                // M1 da R1 da 008: o que esta cópia tem deste computador (pela foto); sem ele, ela não cobre nada.
+                "seq": cofre::seq_da_copia(conn, &c.nome)?,
+            })
+            .to_string(),
         )?;
         let hoje: String = conn.query_row("SELECT strftime('%Y%m%d', 'now', 'localtime')", [], |l| l.get(0))?;
         let mut nomes: Vec<String> = la.into_iter().map(|x| x.0).collect();

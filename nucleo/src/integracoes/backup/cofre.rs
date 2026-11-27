@@ -176,15 +176,16 @@ pub(super) fn enviar_lotes(conn: &Connection, caminho_db: &Path) -> Resultado<us
 /// E7-5 (P-09 (a)): os lotes ficam 7 dias no Drive.
 pub(crate) const DIAS_DOS_LOTES: i64 = 7;
 
-/// E7-5: apaga do Drive os lotes deste computador com mais de 7 dias E anteriores à hora da cópia do dia conferida (o
-/// que eles têm já está nela). Sem cópia do dia conferida, nenhum sai; sem a chave confirmada por um gerente neste caixa,
+/// E7-5: apaga do Drive os lotes deste computador com mais de 7 dias E cobertos pela cópia do dia conferida (o `ate` do
+/// lote até o `seq` lido na foto dela: o que eles têm já está nela). Sem cópia do dia conferida, nenhum sai; sem a chave confirmada por um gerente neste caixa,
 /// nenhum sai (T097). A hora do lote é a que o Drive guarda (`lsf --format pt`, hora local), passada para UTC.
 pub(super) fn limpar_lotes(conn: &Connection) -> Resultado<usize> {
     let Some(remota) = pasta_no_drive(conn)? else { return Ok(0) };
     if !chave_confirmada(conn)? {
         return Ok(0);
     }
-    let Some(copia) = hora_da_copia_conferida(conn)? else { return Ok(0) };
+    // M1: coberto pela cópia do dia conferida = o `ate` do lote dentro do que a foto tem (pelo `seq`).
+    let Some(copia) = seq_da_copia_conferida(conn)? else { return Ok(0) };
     let saida = match rclone(
         &["lsf", "--files-only", "--format", "pt", "--separator", "|", &remota],
         Duration::from_secs(60),
@@ -196,16 +197,15 @@ pub(super) fn limpar_lotes(conn: &Connection) -> Resultado<usize> {
     let mut apagados = 0;
     for l in saida.lines() {
         let Some((nome, hora)) = l.split_once('|') else { continue };
-        if ler_nome_do_lote(nome).is_none() {
-            continue;
-        }
-        let sai: bool = conn
+        let Some((_, ate)) = ler_nome_do_lote(nome) else { continue };
+        let velho: bool = conn
             .query_row(
-                "SELECT julianday('now') - julianday(?1, 'utc') > ?2 AND julianday(?1, 'utc') < julianday(?3)",
-                params![hora.trim(), DIAS_DOS_LOTES, copia],
+                "SELECT julianday('now') - julianday(?1, 'utc') > ?2",
+                params![hora.trim(), DIAS_DOS_LOTES],
                 |r| r.get::<_, Option<bool>>(0),
             )?
             .unwrap_or(false);
+        let sai = velho && ate <= copia;
         if sai && rclone(&["deletefile", &format!("{remota}/{nome}")], Duration::from_secs(60)).is_ok() {
             apagados += 1;
         }
@@ -232,9 +232,11 @@ pub(super) fn volta(conn: &Connection, caminho_db: &Path) -> Resultado<usize> {
 /// - "atencao": há alteração deste computador sem prova (pendente);
 /// - "critico": a mais antiga sem prova tem mais de 24 h.
 ///
-/// Uma alteração deste computador só está protegida com prova gravada: o lote dela conferido no Drive (`CONFERIDO_ATE`),
-/// ou ela é anterior à HORA DA CÓPIA do dia que foi conferida no Drive (pelo nome da cópia, e não pela hora da
-/// conferência, que viria depois e cobriria alterações que a cópia não tem). As de outros caixas são de cada um.
+/// Uma alteração deste computador só está protegida com prova gravada (A1 e M1 da R1 da 008):
+/// - ou ela está num lote conferido no Drive, isto é, entre o `LOTE_INICIO` (exclusive) e o `CONFERIDO_ATE`;
+/// - ou ela está na cópia do dia conferida no Drive, isto é, o `seq` dela é até o `MAX(seq)` deste computador lido NA
+///   FOTO dessa cópia (e não pela hora, que pode vir depois da foto).
+/// O que é anterior ao início dos lotes só conta com a cópia do dia. As de outros caixas são de cada um.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Protecao {
@@ -243,21 +245,38 @@ pub struct Protecao {
     pub desde: Option<String>,
 }
 
-/// A hora (UTC, RFC 3339) em que foi feita a cópia do dia conferida no Drive, pelo nome dela (hora local).
-fn hora_da_copia_conferida(conn: &Connection) -> Resultado<Option<String>> {
-    let Some(texto) = config::ler(conn, CONFERIDA_NO_DRIVE)? else { return Ok(None) };
-    let Ok(v) = serde_json::from_str::<Value>(&texto) else { return Ok(None) };
-    let Some(b) = v["nome"].as_str().and_then(ler_nome) else { return Ok(None) };
-    let local = format!(
-        "{}-{}-{} {}:{}:{}",
-        &b.dia[..4],
-        &b.dia[4..6],
-        &b.dia[6..8],
-        &b.hora[..2],
-        &b.hora[2..4],
-        &b.hora[4..6]
-    );
-    Ok(conn.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%SZ', ?1, 'utc')", [&local], |l| l.get(0))?)
+/// M1 da R1 da 008: o `MAX(seq)` deste computador lido na foto de cada cópia do dia, pelo nome local dela (mapa local,
+/// as 30 mais novas).
+const SEQ_DAS_COPIAS: &str = "backup_seq_das_copias";
+
+pub(super) fn anotar_seq_da_copia(conn: &Connection, nome: &str, seq: i64) -> Resultado<()> {
+    let mut mapa: serde_json::Map<String, Value> =
+        config::ler(conn, SEQ_DAS_COPIAS)?.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    mapa.insert(nome.to_string(), json!(seq));
+    while mapa.len() > 30 {
+        let mais_velha = mapa.keys().min().cloned();
+        match mais_velha {
+            Some(k) => {
+                mapa.remove(&k);
+            }
+            None => break,
+        }
+    }
+    config::gravar(conn, SEQ_DAS_COPIAS, &Value::Object(mapa).to_string())
+}
+
+pub(super) fn seq_da_copia(conn: &Connection, nome: &str) -> Resultado<Option<i64>> {
+    Ok(config::ler(conn, SEQ_DAS_COPIAS)?
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v[nome].as_i64()))
+}
+
+/// O `seq` (deste computador) que a cópia do dia conferida no Drive tem. Sem ele (uma conferência de antes desta versão),
+/// a cópia não cobre nada: nunca protegido sem prova.
+fn seq_da_copia_conferida(conn: &Connection) -> Resultado<Option<i64>> {
+    Ok(config::ler(conn, CONFERIDA_NO_DRIVE)?
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v["seq"].as_i64()))
 }
 
 pub fn protecao(conn: &Connection) -> Resultado<Protecao> {
@@ -265,12 +284,20 @@ pub fn protecao(conn: &Connection) -> Resultado<Protecao> {
         return Ok(Protecao { nivel: "sem_cofre".into(), pendentes: 0, desde: None });
     }
     let este = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
-    let conferido = ler_seq(conn, CONFERIDO_ATE)?.unwrap_or(-1);
-    let copia = hora_da_copia_conferida(conn)?;
+    // A1 da R1 da 008: os lotes provam só o que está DEPOIS do início do cofre e até o conferido; o que é anterior ao
+    // início só tem a prova da cópia do dia conferida (pelo `seq` da foto, M1). Antes, o primeiro lote conferido
+    // "cobria" todo o histórico anterior, que não estava em arquivo nenhum.
+    let inicio = ler_seq(conn, LOTE_INICIO)?;
+    let conferido = ler_seq(conn, CONFERIDO_ATE)?;
+    let (lote_de, lote_ate) = match (inicio, conferido) {
+        (Some(i), Some(c)) if c > i => (i, c),
+        _ => (0, 0),
+    };
+    let copia = seq_da_copia_conferida(conn)?.unwrap_or(-1);
     let (pendentes, desde): (i64, Option<String>) = conn.query_row(
         "SELECT COUNT(*), MIN(quando) FROM alteracao
-          WHERE dispositivo = ?1 AND seq > ?2 AND (?3 IS NULL OR julianday(quando) > julianday(?3))",
-        params![este, conferido, copia],
+          WHERE dispositivo = ?1 AND NOT (seq > ?2 AND seq <= ?3) AND seq > ?4",
+        params![este, lote_de, lote_ate, copia],
         |l| Ok((l.get(0)?, l.get(1)?)),
     )?;
     let nivel = if pendentes == 0 {
@@ -391,8 +418,8 @@ mod testes {
     }
 
     /// Testes 16, 17 e 18 (E7-4): nada é "em dia" sem prova; o envio sem conferência não protege; a alteração fica
-    /// pendente e vira crítica depois de 24 h; o lote conferido protege; a cópia do dia conferida protege só o que é
-    /// anterior à hora DELA.
+    /// pendente e vira crítica depois de 24 h; o lote conferido protege; a cópia do dia conferida protege só o que a
+    /// foto DELA tem (o `seq`).
     #[test]
     fn e7_4_protecao_so_com_prova() {
         let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
@@ -407,8 +434,9 @@ mod testes {
         // 16: um lote mandado e não conferido não muda nada (só CONFERIDO_ATE conta).
         config::gravar(&b.conn, GERADO_ATE, "999999").unwrap();
         assert_eq!(protecao(&b.conn).unwrap().nivel, "atencao");
-        // O lote conferido até o fim do registro: em dia.
+        // Os lotes conferidos desde o começo do registro (o cofre começou no zero): em dia.
         let fim: i64 = b.conn.query_row("SELECT MAX(seq) FROM alteracao", [], |l| l.get(0)).unwrap();
+        config::gravar(&b.conn, LOTE_INICIO, "0").unwrap();
         config::gravar(&b.conn, CONFERIDO_ATE, &fim.to_string()).unwrap();
         assert_eq!(protecao(&b.conn).unwrap(), Protecao { nivel: "em_dia".into(), pendentes: 0, desde: None });
         // 17: uma venda nova (aqui, um usuário) sem lote conferido fica pendente; com mais de 24 h, crítica.
@@ -421,19 +449,58 @@ mod testes {
             )
             .unwrap();
         assert_eq!(protecao(&b.conn).unwrap().nivel, "critico");
-        // A cópia do dia conferida protege o que é anterior à hora dela (pelo nome), e não o que veio depois.
-        let agora_local: String =
-            b.conn.query_row("SELECT strftime('%Y%m%d-%H%M%S', 'now', 'localtime')", [], |l| l.get(0)).unwrap();
-        let nome = format!("rustinho-{agora_local}-abc.{EXTENSAO}");
-        config::gravar(&b.conn, CONFERIDA_NO_DRIVE, &json!({ "nome": nome }).to_string()).unwrap();
-        assert_eq!(protecao(&b.conn).unwrap().nivel, "em_dia", "a de 25 h atrás está na cópia de agora");
-        b.conn
-            .execute(
-                "UPDATE alteracao SET quando = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '+1 hour') WHERE seq > ?1",
-                [fim],
-            )
+        // M1: a cópia do dia conferida cobre o que a FOTO tem (o `seq` dela), e não o que veio depois.
+        let fim2: i64 = b.conn.query_row("SELECT MAX(seq) FROM alteracao", [], |l| l.get(0)).unwrap();
+        config::gravar(&b.conn, CONFERIDA_NO_DRIVE, &json!({ "nome": "x", "seq": fim2 }).to_string()).unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "em_dia", "tudo até o seq da foto está na cópia");
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Caio", "3333", false).unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "atencao", "o posterior à foto continua pendente");
+        // Uma conferência sem o `seq` (de antes desta versão) não cobre nada.
+        config::gravar(&b.conn, CONFERIDA_NO_DRIVE, &json!({ "nome": "x" }).to_string()).unwrap();
+        config::gravar(&b.conn, CONFERIDO_ATE, "0").unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "critico");
+    }
+
+    /// A1 da R1 da 008 (a sonda r1_buraco_da_primeira_volta do revisor): o cofre começa no fim do registro; o primeiro lote
+    /// conferido prova só o que veio DEPOIS do início. O histórico anterior, sem a cópia do dia conferida, continua
+    /// pendente (antes: "em dia" com nada no Drive).
+    /// M1 da R1 da 008: a cópia do dia guarda o `MAX(seq)` deste computador lido NA FOTO dela; o que entra depois não
+    /// fica coberto por ela. (O caso "entre a foto e o nome" não é encenável aqui: a prova dele é a leitura na foto.)
+    #[test]
+    fn e7_4_m1_a_copia_guarda_o_seq_da_foto() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let (b, caminho, _nuvem) = loja_de_teste("cofre-seq-da-foto");
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        let antes: i64 = b
+            .conn
+            .query_row("SELECT MAX(seq) FROM alteracao WHERE dispositivo = ?1", [&b.dispositivo], |l| l.get(0))
             .unwrap();
-        assert_eq!(protecao(&b.conn).unwrap().nivel, "atencao", "a posterior à cópia continua pendente");
+        let feito = super::super::fazer(&caminho, false).unwrap();
+        let nome = Path::new(&feito.arquivo).file_name().unwrap().to_string_lossy().to_string();
+        assert_eq!(seq_da_copia(&b.conn, &nome).unwrap(), Some(antes), "o seq da foto, gravado com a cópia");
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Caio", "3333", false).unwrap();
+        assert_eq!(seq_da_copia(&b.conn, &nome).unwrap(), Some(antes), "o que veio depois não entra na cópia");
+        let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    }
+
+    #[test]
+    fn e7_4_a1_primeira_volta_nao_cobre_o_historico() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let (b, _caminho, _nuvem) = loja_de_teste("cofre-primeira-volta");
+        let antes = protecao(&b.conn).unwrap();
+        assert_eq!(antes.nivel, "atencao");
+        let inicio = partida(&b.conn).unwrap();
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        let fim: i64 = b.conn.query_row("SELECT MAX(seq) FROM alteracao", [], |l| l.get(0)).unwrap();
+        assert!(fim > inicio);
+        // O primeiro lote, conferido até o fim: o histórico anterior continua sem prova.
+        config::gravar(&b.conn, CONFERIDO_ATE, &fim.to_string()).unwrap();
+        let p = protecao(&b.conn).unwrap();
+        assert_eq!(p.nivel, "atencao", "o histórico anterior ao início não está em arquivo nenhum: {p:?}");
+        assert_eq!(p.pendentes, antes.pendentes, "pendente é exatamente o histórico anterior");
+        // Com a cópia do dia conferida cobrindo o histórico (o seq da foto até o início): em dia.
+        config::gravar(&b.conn, CONFERIDA_NO_DRIVE, &json!({ "nome": "x", "seq": inicio }).to_string()).unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "em_dia");
     }
 
     /// E7-4 no Início (resposta do proprietário de 26/11, perto da meia-noite): no minuto normal do envio, nenhum aviso;
@@ -446,6 +513,7 @@ mod testes {
             crate::avisos::do_dia(&b.conn).unwrap().into_iter().find(|a| a.id == "backup_protecao").map(|a| a.categoria)
         };
         let fim: i64 = b.conn.query_row("SELECT MAX(seq) FROM alteracao", [], |l| l.get(0)).unwrap();
+        config::gravar(&b.conn, LOTE_INICIO, "0").unwrap();
         config::gravar(&b.conn, CONFERIDO_ATE, &fim.to_string()).unwrap();
         assert_eq!(aviso(&b), None, "em dia: sem aviso");
         crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
@@ -484,27 +552,23 @@ mod testes {
         };
         let velho = nome_do_lote(1, 10);
         let novo = nome_do_lote(11, 20);
-        let copia_em = |dias: i64| {
-            let d: String = b
-                .conn
-                .query_row(&format!("SELECT strftime('%Y%m%d-%H%M%S', 'now', 'localtime', '-{dias} days')"), [], |l| {
-                    l.get(0)
-                })
-                .unwrap();
-            config::gravar(
-                &b.conn,
-                CONFERIDA_NO_DRIVE,
-                &json!({ "nome": format!("rustinho-{d}-abc.{EXTENSAO}") }).to_string(),
-            )
-            .unwrap();
+        // M1: a cópia conferida cobre até o `seq` da foto dela.
+        let copia_ate = |seq: i64| {
+            config::gravar(&b.conn, CONFERIDA_NO_DRIVE, &json!({ "nome": "x", "seq": seq }).to_string()).unwrap();
         };
-        // A cópia conferida é de 20 dias atrás: o lote de 10 dias tem coisa que ela não tem, e fica.
         lote(&velho, 10);
         lote(&novo, 2);
-        copia_em(20);
+        // A cópia conferida tem só até o 5: o lote 1-10 tem coisa que ela não tem, e fica.
+        copia_ate(5);
         assert_eq!(limpar_lotes(&b.conn).unwrap(), 0);
-        // A cópia conferida é de agora: o de 10 dias está nela e sai; o de 2 dias fica (7 dias).
-        copia_em(0);
+        // M3 (T097): sem a chave confirmada por um gerente neste caixa, nenhum lote sai.
+        let publica = config::ler(&b.conn, "backup_publica").unwrap().unwrap();
+        let outra: [u8; 32] = aleatorio().unwrap();
+        config::gravar(&b.conn, "backup_publica", &hex(&publica_de(&outra))).unwrap();
+        copia_ate(30);
+        assert_eq!(limpar_lotes(&b.conn).unwrap(), 0, "chave não confirmada: nada sai");
+        config::gravar(&b.conn, "backup_publica", &publica).unwrap();
+        // A cópia tem até o 30: o de 10 dias está nela e sai; o de 2 dias fica (7 dias).
         assert_eq!(limpar_lotes(&b.conn).unwrap(), 1);
         let ficaram: Vec<String> =
             std::fs::read_dir(&remota).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
