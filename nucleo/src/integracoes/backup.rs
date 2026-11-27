@@ -2138,6 +2138,7 @@ pub fn restaurar_por(
     pendente.troca = tempo::novo_id();
     pendente.auditoria = usuario_id.map(|u| (u.to_string(), info.quando.clone()));
     pendente.copia_quando = info.quando.clone();
+    pendente.copia_dispositivo = info.dispositivo.clone();
     marcar_banco_que_entra(&db, &pendente.troca)?;
     // D-08: anota ao lado do banco o que é deste computador ANTES de trocar o
     // banco. Se o Rustinho cair no meio, ao abrir de novo termina daqui.
@@ -2302,6 +2303,10 @@ pub struct Pendente {
     /// de versão antiga.
     #[serde(default)]
     copia_quando: String,
+    /// M2 da R1 da 008: o computador que fez a cópia (para a gaveta dele que estava aberta, quando a cópia vem de outro
+    /// computador, como na reinstalação da PEND-30). Vazio numa marca de versão antiga.
+    #[serde(default)]
+    copia_dispositivo: String,
     /// Protocolo 4 (E5, etapa 6; 0.9.19-dev.2, T009): o registro assinado de caixas
     /// aprovados e retirados de antes da restauração. Volta por `aprovados::juntar`
     /// (acrescenta, nunca tira): restaurar um backup de antes de uma retirada não
@@ -2358,6 +2363,7 @@ impl Pendente {
             troca: String::new(),
             auditoria: None,
             copia_quando: String::new(),
+            copia_dispositivo: String::new(),
             registro,
         })
     }
@@ -2470,13 +2476,29 @@ impl Pendente {
             .prepare("SELECT id FROM caixa_sessao WHERE fechado_em IS NULL AND dispositivo = ?1")?
             .query_map([&dispositivo], |l| l.get(0))?
             .collect::<Result<_, _>>()?;
-        if abertas.is_empty() {
+        // M2 da R1 da 008: a cópia veio de OUTRO computador (a loja reinstalada): a gaveta dele que estava aberta na
+        // cópia não é deste caixa e não fecha aqui; o Início avisa por 3 dias para contar o dinheiro dela. As gavetas
+        // dos outros caixas da loja (que continuam funcionando) não entram.
+        let de_outro: Vec<String> = if !self.copia_dispositivo.is_empty() && self.copia_dispositivo != dispositivo {
+            tx.prepare("SELECT id FROM caixa_sessao WHERE fechado_em IS NULL AND dispositivo = ?1")?
+                .query_map([&self.copia_dispositivo], |l| l.get(0))?
+                .collect::<Result<_, _>>()?
+        } else {
+            Vec::new()
+        };
+        if abertas.is_empty() && de_outro.is_empty() {
             tx.execute("DELETE FROM config WHERE chave = ?1", [GAVETA_DA_RESTAURACAO])?;
         } else {
             config::gravar(
                 &tx,
                 GAVETA_DA_RESTAURACAO,
-                &json!({ "sessoes": abertas, "copia": self.copia_quando }).to_string(),
+                &json!({
+                    "sessoes": abertas,
+                    "deOutro": de_outro,
+                    "copia": self.copia_quando,
+                    "quando": tempo::agora(),
+                })
+                .to_string(),
             )?;
         }
         tx.commit()?;
@@ -3306,6 +3328,62 @@ pub(crate) mod testes {
         // Um caminho que sobe não é aceito.
         assert!(restaurar(&mut a.conn, Some(&caminho_a), &format!("../{antiga}"), true, "1111").is_err());
         std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// M2 da R1 da 008: a cópia restaurada num computador NOVO (a reinstalação da PEND-30) com a gaveta do computador de
+    /// antes aberta: o Início avisa para contar o dinheiro dela (por 3 dias); a gaveta não é deste caixa. Controle: a
+    /// mesma cópia restaurada no próprio computador dá o aviso de sempre (o da gaveta deste caixa), e não este.
+    #[test]
+    fn e7_8_m2_gaveta_do_computador_de_antes() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("gaveta-de-outro");
+        let ca = pasta.join("a").join("rustinho.db");
+        let cb = pasta.join("b").join("rustinho.db");
+        std::fs::create_dir_all(ca.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(cb.parent().unwrap()).unwrap();
+        let mut a = Banco::abrir(&ca).unwrap();
+        let ana = crate::usuarios::criar(&a.conn, &a.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&a.conn, &ana.id, true).unwrap();
+        gerente_conferido(&a.conn, &ana.id, "1111", None).unwrap();
+        a.conn
+            .execute(
+                "INSERT INTO caixa_sessao (id, dispositivo, caixa_nome, aberto_em, valor_inicial)
+                 VALUES ('sessao-a', ?1, 'Caixa 1', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 20000)",
+                [&a.dispositivo],
+            )
+            .unwrap();
+        let copia = fazer(&ca, false).unwrap().arquivo;
+        let avisos =
+            |b: &Banco| -> Vec<String> { crate::avisos::do_dia(&b.conn).unwrap().into_iter().map(|x| x.id).collect() };
+        // O computador novo restaura a cópia do de antes.
+        let mut b = Banco::abrir(&cb).unwrap();
+        assert_ne!(a.dispositivo, b.dispositivo);
+        restaurar(&mut b.conn, Some(&cb), &copia, false, "1111").unwrap();
+        let ids = avisos(&b);
+        assert!(ids.iter().any(|i| i == "gaveta_de_outro_computador"), "{ids:?}");
+        assert!(!ids.iter().any(|i| i == "gaveta_da_restauracao"), "não é a gaveta deste caixa: {ids:?}");
+        let texto = crate::avisos::do_dia(&b.conn)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.id == "gaveta_de_outro_computador")
+            .unwrap()
+            .texto;
+        assert!(texto.contains("gaveta do computador de antes") && texto.contains("Conte o dinheiro"), "{texto}");
+        // Passados 3 dias da restauração, o aviso some.
+        let marca: Value =
+            serde_json::from_str(&config::ler(&b.conn, GAVETA_DA_RESTAURACAO).unwrap().unwrap()).unwrap();
+        let mut velha = marca.clone();
+        velha["quando"] = json!("2000-01-01T00:00:00Z");
+        config::gravar(&b.conn, GAVETA_DA_RESTAURACAO, &velha.to_string()).unwrap();
+        assert!(!avisos(&b).iter().any(|i| i == "gaveta_de_outro_computador"), "some em 3 dias");
+        // Controle: no próprio computador, o aviso é o da gaveta deste caixa.
+        restaurar(&mut a.conn, Some(&ca), &copia, false, "1111").unwrap();
+        let ids = avisos(&a);
+        assert!(ids.iter().any(|i| i == "gaveta_da_restauracao"), "{ids:?}");
+        assert!(!ids.iter().any(|i| i == "gaveta_de_outro_computador"), "{ids:?}");
+        drop(a);
+        drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
     }
 

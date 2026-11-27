@@ -1214,6 +1214,46 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             a.acao = "Ver o caixa".into();
             avisos.push(a);
         }
+        // M2 da R1 da 008: a gaveta do computador de antes (a cópia veio de outro computador) não fecha aqui; o aviso
+        // fica 3 dias depois da restauração.
+        let de_outro = v["deOutro"].as_array().is_some_and(|a| !a.is_empty());
+        let recente: bool = conn
+            .query_row(
+                "SELECT ?1 > strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-3 days')",
+                [v["quando"].as_str().unwrap_or("")],
+                |l| l.get(0),
+            )
+            .unwrap_or(false);
+        if de_outro && recente {
+            let hora: Option<String> = conn
+                .query_row(
+                    "SELECT strftime('%d/%m às %H:%M', ?1, 'localtime')",
+                    [v["copia"].as_str().unwrap_or("")],
+                    |l| l.get(0),
+                )
+                .ok()
+                .flatten();
+            let mut a = Aviso::simples(
+                "gaveta_de_outro_computador",
+                &hoje,
+                "Caixa".into(),
+                match &hora {
+                    Some(h) => {
+                        format!("A gaveta do computador de antes estava aberta na cópia de {h}. Conte o dinheiro dela.")
+                    }
+                    None => "A gaveta do computador de antes estava aberta na cópia. Conte o dinheiro dela.".into(),
+                },
+                String::new(),
+                "caixa",
+            )
+            .categoria(ATENCAO);
+            a.descricao = "A cópia restaurada veio de outro computador, e a gaveta dele estava aberta. Ela não fecha \
+                 neste computador. Conte o dinheiro que estava nela e lance como entrada quando abrir a gaveta deste \
+                 computador. Este aviso some sozinho em 3 dias."
+                .into();
+            a.acao = "Ver o caixa".into();
+            avisos.push(a);
+        }
     }
     // E7-4 (P-10 (a) e a resposta do proprietário de 26/11/2026, perto da meia-noite): a proteção contínua. O Início só
     // avisa quando algo deste caixa passa de 5 minutos sem prova no Drive (no minuto normal do envio, não); com mais de

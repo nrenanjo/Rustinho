@@ -46,8 +46,13 @@ fn partida(conn: &Connection) -> Resultado<i64> {
 }
 
 /// A pasta dos lotes neste computador (dentro da pasta de backup).
+/// M4 da R1 da 008: `lotes/<dispositivo>/`: numa pasta de backup compartilhada (dois caixas apontando para a mesma), os
+/// lotes de um nunca vão para a pasta do Drive do outro.
 pub(super) fn pasta_local_dos_lotes(conn: &Connection, caminho_db: &Path) -> Resultado<PathBuf> {
-    Ok(ajustes(conn, Some(caminho_db))?.pasta.join("lotes"))
+    let disp = config::ler(conn, "dispositivo_id")?
+        .filter(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        .ok_or_else(|| Erro::Interno("o caixa sem identidade não gera lotes".into()))?;
+    Ok(ajustes(conn, Some(caminho_db))?.pasta.join("lotes").join(disp))
 }
 
 /// O nome do lote: `<de>-<ate>.rbl`, com 16 dígitos (a ordem alfabética é a numérica).
@@ -721,6 +726,40 @@ mod testes {
         std::env::remove_var("RUSTINHO_RCLONE");
         std::env::remove_var("RUSTINHO_REMOTO");
         let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// M4 da R1 da 008: dois caixas com a mesma pasta de backup: cada um manda só os lotes dele, para a pasta dele no
+    /// Drive.
+    #[test]
+    fn e7_2_m4_pasta_de_backup_compartilhada_nao_mistura_lotes() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste do cofre pulado");
+            return;
+        }
+        let (b1, c1, nuvem) = loja_de_teste("cofre-compartilhada-1");
+        let (b2, c2, _) = loja_de_teste("cofre-compartilhada-2");
+        assert_ne!(b1.dispositivo, b2.dispositivo);
+        let comum = c1.parent().unwrap().join("pasta-comum");
+        std::fs::create_dir_all(&comum).unwrap();
+        for b in [&b1, &b2] {
+            config::gravar(&b.conn, "backup_pasta", &comum.display().to_string()).unwrap();
+            partida(&b.conn).unwrap();
+            crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        }
+        // O segundo caixa gera o lote dele e ainda não mandou (sem internet).
+        assert_eq!(gerar_lotes(&b2.conn, &c2).unwrap(), 1);
+        let do_segundo = pasta_local_dos_lotes(&b2.conn, &c2).unwrap();
+        assert!(do_segundo.ends_with(&b2.dispositivo), "{}", do_segundo.display());
+        // O primeiro faz a volta dele: manda só o seu.
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        assert_eq!(volta(&b1.conn, &c1).unwrap(), 1);
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let no_drive = nuvem.join("0193cccc-cccc-7ccc-cccc-cccccccccccc").join(&b1.dispositivo).join("lotes");
+        assert_eq!(std::fs::read_dir(&no_drive).unwrap().count(), 1, "só o lote do primeiro na pasta dele");
+        assert_eq!(std::fs::read_dir(&do_segundo).unwrap().count(), 1, "o lote do segundo continua esperando por ele");
+        let _ = std::fs::remove_dir_all(c1.parent().unwrap());
+        let _ = std::fs::remove_dir_all(c2.parent().unwrap());
     }
 
     /// E7-3 (D3): só a conferência faz o cofre andar; um lote mandado e conferido sai da pasta local, e um envio cortado
