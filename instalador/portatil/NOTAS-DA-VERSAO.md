@@ -28,8 +28,8 @@ Precisa do FUSE 2 (no CachyOS/Arch: `sudo pacman -S --needed fuse2`). O Qt, as t
 
 ### Dados de teste
 
-- **Windows (ZIP portátil):** tudo fica na própria pasta e não abre nem muda o Rustinho instalado no computador: banco, backups, registro de falhas e PDFs na pasta `dados`; a pasta de sempre (`%LOCALAPPDATA%\Rustinho`) e `RUSTINHO_DADOS` não são usadas; backups só dentro da pasta; Google Drive com ligação própria; troca de dados só com outro Rustinho portátil (portas 47820 e 47821, e outra chave). Para apagar o teste, apague a pasta.
-- **Linux (AppImage normal):** use `RUSTINHO_DADOS=~/rustinho-teste` (passo 3) para separar os dados de teste; para apagar o teste, apague essa pasta. Nos testes, não ligue a troca de dados com a senha da rede de uma loja de verdade nem o Google Drive da loja.
+- **Windows (ZIP portátil):** tudo fica na própria pasta e não abre nem muda o Rustinho instalado no computador: banco, backups, registro de falhas e PDFs na pasta `dados`; a pasta de sempre (`%LOCALAPPDATA%\Rustinho`) e `RUSTINHO_DADOS` não são usadas; backups só dentro da pasta; sem o Google Drive nesta versão (ele volta na 0.9.20); troca de dados só com outro Rustinho portátil (portas 47820 e 47821, e outra chave). Para apagar o teste, apague a pasta.
+- **Linux (AppImage normal):** use `RUSTINHO_DADOS=~/rustinho-teste` (passo 3) para separar os dados de teste; para apagar o teste, apague essa pasta. Nos testes, não ligue a troca de dados com a senha da rede de uma loja de verdade.
 
 ### Conferir os arquivos (SHA-256)
 
@@ -71,7 +71,7 @@ Linux: `sha256sum {{APPIMAGE}}`
 - **Estoque inteiro:** peça em UN, PC, PAR... não aceita estoque com vírgula (ajuste, estoque inicial e mínimo).
 - **Peça e serviço:** trocar o tipo não leva mais o fiscal do outro tipo junto ao salvar.
 - **Navegação contextual:** quando algo falta (ex.: código ambíguo nas etiquetas, conta de destino na transferência), a tela leva ao lugar de resolver e volta.
-- **Backup:** a cópia no Google Drive só conta como guardada depois de conferida; a restauração registra quem restaurou e nunca deixa o banco pela metade.
+- **Backup:** o Google Drive fica desligado nesta versão (volta na 0.9.20); a cópia num pen drive pode ser restaurada já na primeira tela; a restauração registra quem restaurou e nunca deixa o banco pela metade.
 - **Celular:** botões e campos com área de toque de pelo menos 48 dp; ícone adaptativo do Android.
 - **Android:** o app passa a abrir o banco (antes mostrava sempre "Não foi possível abrir o Rustinho… a pasta não aceita trava") e a cadastrar a loja (antes recusava, sem conseguir saber em que aparelho estava). Conferido no emulador; ainda precisa ser conferido num celular de verdade. No Android de 32 bits a tela cinza (PEND-18) continua.
 

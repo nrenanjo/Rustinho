@@ -126,7 +126,9 @@ FocusScope {
                 Layout.topMargin: 8
                 Nota {
                     text: tela.copias.length === 0 ? ""
-                          : "Encontrei cópias da loja neste " + Tema.aparelho + ". A mais nova é de " + tela.copias[0].quando
+                          : (tela.pastaDasCopias ? "Encontrei cópias da loja na pasta escolhida"
+                                                 : "Encontrei cópias da loja neste " + Tema.aparelho)
+                            + ". A mais nova é de " + tela.copias[0].quando
                             + ". Se o Rustinho foi reinstalado, restaure a loja a partir da cópia: ela volta como estava."
                     font.pixelSize: 15
                     Layout.fillWidth: true

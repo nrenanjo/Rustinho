@@ -257,5 +257,10 @@ fn drv_beta_o_programa_sai_sem_o_google_drive() {
     assert_eq!(r["nuvem"], json!(false), "{r}");
     assert_eq!(r["drive"], json!(false), "{r}");
     assert!(rustinho_nucleo::backup::listar_nuvem(&b.conn).unwrap().is_empty());
+    // M1 da R3: o caixa que mandava ao Drive numa versão anterior, há dias sem envio, não recebe aviso do Drive no Início.
+    rustinho_nucleo::config::gravar(&b.conn, "backup_nuvem_desde", "2026-01-01T00:00:00Z").unwrap();
+    rustinho_nucleo::config::gravar(&b.conn, "backup_nuvem_ultimo", "2026-01-02T00:00:00Z").unwrap();
+    let ids: Vec<String> = rustinho_nucleo::avisos::do_dia(&b.conn).unwrap().into_iter().map(|a| a.id).collect();
+    assert!(!ids.iter().any(|i| i.starts_with("backup_nuvem") || i == "backup_protecao"), "{ids:?}");
     let _ = std::fs::remove_dir_all(&pasta);
 }

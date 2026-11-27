@@ -2661,7 +2661,8 @@ fn restauracao_interrompida(conn: &Connection) -> Resultado<Value> {
     };
     let arquivo = v["arquivo"].as_str().unwrap_or("");
     let nuvem = v["nuvem"].as_bool().unwrap_or(false);
-    let tentar = if arquivo.is_empty() || (!nuvem && !Path::new(arquivo).is_file()) {
+    // B4 da R3: a cópia que veio do Drive não pode ser tentada de novo sem o Drive nesta versão.
+    let tentar = if arquivo.is_empty() || (nuvem && !drive_disponivel()) || (!nuvem && !Path::new(arquivo).is_file()) {
         Value::Null
     } else if nuvem {
         json!({ "nuvem": true, "nome": arquivo, "caminho": "", "quando": hora(v["copia"].as_str().unwrap_or("")) })
@@ -2687,7 +2688,8 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
     let a = ajustes(conn, caminho_db)?;
     let s = situacao(conn)?;
     let (rclone_ok, drive) =
-        if com_drive { (rclone_instalado(), a.nuvem && drive_conectado()) } else { (false, false) };
+        // B5 da R3: sem o Drive nesta versão, nem o `rclone version` roda.
+        if com_drive && drive_disponivel() { (rclone_instalado(), a.nuvem && drive_conectado()) } else { (false, false) };
     // A2 da R1 da 008: a credencial venceu (na cópia do dia ou no cofre): a tela oferece "Reconectar".
     let lote_erro = config::ler(conn, cofre::LOTE_ERRO)?.unwrap_or_default();
     let reconectar = drive && (credencial_vencida(&s.nuvem_erro) || credencial_vencida(&lote_erro));
@@ -2783,6 +2785,27 @@ pub(crate) mod testes {
             "o rclone é exigido (RUSTINHO_EXIGIR_RCLONE) e não está instalado"
         );
         false
+    }
+
+    /// B4 da R3 da 008: sem o Drive nesta versão, uma restauração interrompida que vinha do Drive não oferece "Tentar de
+    /// novo" (o botão seria recusado).
+    #[test]
+    fn b4_r3_sem_drive_nao_oferece_tentar_a_copia_da_nuvem() {
+        let _trava = um_por_vez();
+        let _sem_drive = SemDrive::agora();
+        let b = crate::banco::Banco::em_memoria().unwrap();
+        let marca = |nuvem: bool| {
+            config::gravar(
+                &b.conn,
+                RESTAURACAO_INTERROMPIDA,
+                &json!({ "terminouAgora": false, "quando": tempo::agora(), "nuvem": nuvem,
+                         "arquivo": "loja/caixa/diarias/rustinho-20261126-100000-caixa1.rbk", "copia": "", "antes": "" })
+                .to_string(),
+            )
+            .unwrap();
+        };
+        marca(true);
+        assert_eq!(restauracao_interrompida(&b.conn).unwrap()["tentar"], Value::Null);
     }
 
     /// 27/11/2026: (a) cada teste começa com as variáveis do rclone limpas, mesmo que o anterior tenha parado no meio;
@@ -3591,7 +3614,7 @@ pub(crate) mod testes {
             .find(|x| x.id == "gaveta_de_outro_computador")
             .unwrap()
             .texto;
-        assert!(texto.contains("gaveta do computador de antes") && texto.contains("Conte o dinheiro"), "{texto}");
+        assert!(texto.contains("gaveta de outro computador") && texto.contains("Conte o dinheiro"), "{texto}");
         // Passados 3 dias da restauração, o aviso some.
         let marca: Value =
             serde_json::from_str(&config::ler(&b.conn, GAVETA_DA_RESTAURACAO).unwrap().unwrap()).unwrap();

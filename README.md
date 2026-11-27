@@ -2,7 +2,7 @@
 
 # Rustinho
 
-Sistema para loja de autopeças: balcão de vendas, estoque, compras pelo XML da NF-e, caixa, crediário, financeiro, trocas e devoluções, ordem de serviço (oficina), etiquetas com código de barras, painel e backup no Google Drive. Vários caixas trabalham juntos pelo Wi-Fi e continuam vendendo sem internet.
+Sistema para loja de autopeças: balcão de vendas, estoque, compras pelo XML da NF-e, caixa, crediário, financeiro, trocas e devoluções, ordem de serviço (oficina), etiquetas com código de barras, painel e backup (neste computador e no pen drive; o Google Drive volta na versão 0.9.20). Vários caixas trabalham juntos pelo Wi-Fi e continuam vendendo sem internet.
 
 Feito em **Rust** (regras e banco de dados) com **Qt 6 / QML** (telas). Código livre, licença **MIT**.
 
@@ -30,7 +30,7 @@ Na página [**Releases**](https://github.com/nrenanjo/Rustinho/releases), na ver
 
 1. Nome da loja, nome deste computador (ex.: Caixa 1) e o seu usuário com senha.
 2. Em **Configurações → Loja**, preencha o CNPJ e o estado.
-3. Em **Configurações → Backup**, se quiser, conecte o Google Drive. As cópias saem sempre trancadas; para restaurar, o Rustinho pede a senha de um gerente (use uma senha forte, de 8 ou mais letras e números).
+3. Em **Configurações → Backup**, confira a pasta das cópias (dá para usar um pen drive). O Google Drive volta na versão 0.9.20. As cópias saem sempre trancadas; para restaurar, o Rustinho pede a senha de um gerente (use uma senha forte, de 8 ou mais letras e números).
 4. Outros caixas: na primeira vez, escolha **"Já uso o Rustinho em outro caixa da loja"** e use a mesma senha da rede.
 
 O [**Manual**](MANUAL.md) explica cada parte.

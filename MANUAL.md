@@ -315,6 +315,7 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 - **Senha do backup** (a mesma em todos os caixas): a cópia sai trancada (ChaCha20-Poly1305). **Anote a senha num papel e guarde fora da loja: sem ela o backup não abre.** (Desde a 0.9.11 não tem mais senha do backup: restaurar pede a senha de um gerente.)
 - **Guardar:** 30 dias (dá para mudar). De cada dia fica a cópia mais nova; as 3 mais novas nunca são apagadas.
 - **Pasta:** a pasta `backups` ao lado dos dados (veja "Onde ficam os dados"; dá para trocar, ex.: um HD externo).
+- **Na 0.9.19 Beta, o Google Drive está desligado: ele volta na versão 0.9.20.** As cópias ficam neste computador e no pen drive. Num computador novo (ou reinstalado), a primeira tela oferece "Restaurar de um pen drive ou outra pasta". O que segue vale de novo a partir da 0.9.20.
 - **Google Drive** (grátis, 15 GB sobram muito):
   1. O programa que leva os arquivos (rclone) já vem no instalador do Windows e no AppImage. Compilando no Linux, instale o `rclone` pelo gerenciador de pacotes.
   2. Em Backup, clique em **Conectar ao Google Drive** (até a 0.9.1, antes era preciso criar a senha do backup). O navegador abre: entre na conta do Google e clique em **Permitir**. O Rustinho não vê a senha do Google e só enxerga os arquivos que ele mesmo mandar (pasta "Rustinho Backup").

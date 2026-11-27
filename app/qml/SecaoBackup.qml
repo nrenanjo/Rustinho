@@ -309,7 +309,8 @@ ColumnLayout {
                                    : "No computador: o primeiro sai hoje, às " + secao.b.hora + " ou ao fechar o Rustinho" },
                         { ok: secao.b.drive && secao.b.situacao.nuvemErro === "" && secao.b.situacao.nuvemUltimo !== "",
                           ruim: secao.b.nuvem && secao.b.situacao.nuvemErro !== "",
-                          texto: !secao.b.nuvem ? "No Google Drive: desligado"
+                          texto: !secao.b.driveNaVersao ? "No Google Drive: volta na versão 0.9.20"
+                                 : !secao.b.nuvem ? "No Google Drive: desligado"
                                  : secao.b.situacao.nuvemErro !== "" ? "No Google Drive: " + secao.b.situacao.nuvemErro
                                  : secao.b.situacao.nuvemUltimo ? "No Google Drive: enviado " + secao.quando(secao.b.situacao.nuvemUltimo)
                                  : "No Google Drive: esperando o primeiro envio" }
@@ -397,7 +398,7 @@ ColumnLayout {
         corTitulo: Tema.azulEscuro
         Layout.fillWidth: true
         Nota {
-            text: "No celular, o backup fica guardado no próprio aparelho. Quem manda os backups para o Google Drive é um computador da loja: lá estão todos os dados, os do celular também."
+            text: "No celular, o backup fica guardado no próprio aparelho. Um computador da loja guarda as cópias de todos os dados, os do celular também."
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }

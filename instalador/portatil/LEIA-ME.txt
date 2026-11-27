@@ -27,8 +27,7 @@ O QUE FICA ISOLADO
 - Não abre nem muda o Rustinho instalado neste computador
   (pasta %LOCALAPPDATA%\Rustinho), nem os backups dele.
 - Backups: só dentro desta pasta.
-- Google Drive: usa uma ligação própria. Não ligue a conta do Google da
-  loja nos testes.
+- Google Drive: desligado nesta versão (volta na 0.9.20).
 - Troca de dados: só conversa com outro Rustinho PORTÁTIL (portas 47820
   e 47821). Nunca com um caixa da loja, mesmo com a mesma senha da rede.
 - Não restaure aqui um backup da loja de verdade.

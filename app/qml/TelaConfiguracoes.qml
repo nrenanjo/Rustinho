@@ -1256,7 +1256,7 @@ FocusScope {
                 impressao: "Comprovante, orçamento e impressora",
                 duplicatas: "Diferenças entre caixas e códigos repetidos",
                 historico: "A troca de dados entre os caixas e quem fez o quê",
-                backup: "Cópias dos dados no computador e no Google Drive",
+                backup: "Cópias dos dados neste computador e no pen drive",
                 caixas: "Os computadores da loja trocando dados pela rede",
                 fiscal: "Emissão fiscal, CSOSN, regras de ST, NCM e PIS/Cofins das peças",
                 aparencia: "Tema visual e preferência de movimento deste " + Tema.aparelho,

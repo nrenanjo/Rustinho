@@ -483,7 +483,7 @@ fn estab_erro_depois_da_troca_nao_deixa_usar_o_banco_pela_metade() {
 fn estab_baixar_do_drive_nao_para_a_troca_de_dados() {
     use std::os::unix::fs::PermissionsExt;
     let _vez = backup::testes::um_por_vez();
-    if !backup::rclone_instalado() {
+    if !backup::testes::rclone_para_teste() {
         eprintln!("rclone não instalado: teste pulado");
         return;
     }

@@ -1392,6 +1392,10 @@ impl Servico {
                 Ok(Value::Null)
             }
             "backup_cofre" => {
+                // B5 da R3 (DRV-BETA): sem o Drive nesta versão, o temporizador da tela não faz nada.
+                if !backup::drive_disponivel() {
+                    return Ok(Value::Null);
+                }
                 if let Some(c) = &self.banco.caminho {
                     if usuarios::quantidade(&self.banco.conn)? > 0 {
                         backup::cofre_automatico(c.clone());

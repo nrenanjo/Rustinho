@@ -1123,7 +1123,8 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
                 .secao("backup"),
         );
     }
-    if config::ligado(conn, "backup_nuvem")? {
+    // M1 da R3 da 008 (DRV-BETA): sem o Drive nesta versão, nada de aviso do Drive, mesmo com o ajuste ligado antes.
+    if backup::drive_disponivel() && config::ligado(conn, "backup_nuvem")? {
         let referencia = if b.nuvem_ultimo.is_empty() { &b.nuvem_desde } else { &b.nuvem_ultimo };
         let sem_nuvem = if referencia.is_empty() { 0 } else { dias_desde(referencia)? };
         if sem_nuvem >= backup::DIAS_ATE_AVISAR {
@@ -1242,9 +1243,9 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
                 "Caixa".into(),
                 match &hora {
                     Some(h) => {
-                        format!("A gaveta do computador de antes estava aberta na cópia de {h}. Conte o dinheiro dela.")
+                        format!("A gaveta de outro computador estava aberta na cópia de {h}. Conte o dinheiro dela.")
                     }
-                    None => "A gaveta do computador de antes estava aberta na cópia. Conte o dinheiro dela.".into(),
+                    None => "A gaveta de outro computador estava aberta na cópia. Conte o dinheiro dela.".into(),
                 },
                 String::new(),
                 "caixa",
