@@ -103,9 +103,12 @@ pub fn salvar_ajustes(conn: &Connection, ligado: bool, senha: &str, enderecos: &
     }
     for e in enderecos.split([',', ' ', ';', '\n']).filter(|e| !e.trim().is_empty()) {
         let e = e.trim();
-        let ok = e.parse::<std::net::IpAddr>().is_ok() || e.parse::<SocketAddr>().is_ok();
-        if !ok {
-            return Err(Erro::campo("enderecos", format!("Endereço inválido: {e} (ex.: 192.168.0.12)")));
+        // E6-1 (T002 da 009): IP, IP:porta, nome ou nome:porta.
+        if !super::cliente::endereco_valido(e) {
+            return Err(Erro::campo(
+                "enderecos",
+                format!("Endereço inválido: {e} (ex.: 192.168.0.12 ou caixa2.loja.local)"),
+            ));
         }
     }
     config::gravar(conn, "sync_ligado", if ligado { "1" } else { "0" })?;

@@ -746,12 +746,15 @@ fn entrar_com_convite(
     let disp = config::ler(&conn, "dispositivo_id")?.unwrap_or_default();
     let pedido = aprovados::Pedido::com_dispositivo(&id.identidade, &disp);
     let mut alvos: Vec<SocketAddr> = Vec::new();
-    let candidatos = std::iter::once(qr.endereco.clone()).chain(enderecos.iter().cloned());
-    for e in candidatos.filter(|e| !e.trim().is_empty()) {
-        if let Ok(a) = endereco_completo(e.trim()) {
-            if !alvos.contains(&a) {
-                alvos.push(a);
-            }
+    if let Ok(a) = endereco_completo(qr.endereco.trim()) {
+        alvos.push(a);
+    }
+    // E6-1 (T002 da 009): um endereço DIGITADO que não dá certo (um nome que não está na rede, ou que não respondeu a
+    // tempo) é dito no próprio campo, em vez de ser pulado em silêncio.
+    for e in enderecos.iter().filter(|e| !e.trim().is_empty()) {
+        let a = endereco_completo(e.trim()).map_err(|erro| Erro::campo("enderecos", erro.to_string()))?;
+        if !alvos.contains(&a) {
+            alvos.push(a);
         }
     }
     for a in ouvidos(caminho, &loja_esperada) {

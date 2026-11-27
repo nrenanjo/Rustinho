@@ -2802,6 +2802,12 @@ impl Servico {
             "ocupantePorta": ocupante,
             "senhaFraca": sync::senha_fora_da_politica(conn)?,
             "enderecos": a.enderecos.join(", "),
+            // E6-1 (T002 da 009): o IP de cada nome digitado, resolvido no último ciclo (ou o erro).
+            "nomesResolvidos": sync::nomes_resolvidos()
+                .into_iter()
+                .filter(|(n, _)| a.enderecos.iter().any(|e| e.split(':').next() == Some(n.as_str())))
+                .map(|(n, r)| json!({ "nome": n, "resultado": r }))
+                .collect::<Vec<_>>(),
             "interfaces": a.interfaces.join(", "),
             "interfacesIgnoradas": sync::interfaces_ignoradas(&a.interfaces),
             "caixa": a.nome,
@@ -3711,8 +3717,12 @@ struct Convivencia {
 fn enderecos_digitados(texto: &str) -> Resultado<Vec<String>> {
     let mut lista = Vec::new();
     for e in texto.split([',', ' ', ';', '\n']).map(str::trim).filter(|e| !e.is_empty()) {
-        if e.parse::<std::net::IpAddr>().is_err() && e.parse::<std::net::SocketAddr>().is_err() {
-            return Err(Erro::campo("enderecos", format!("Endereço inválido: {e} (ex.: 192.168.0.12)")));
+        // E6-1 (T002 da 009): IP, IP:porta, nome ou nome:porta.
+        if !crate::sync::endereco_valido(e) {
+            return Err(Erro::campo(
+                "enderecos",
+                format!("Endereço inválido: {e} (ex.: 192.168.0.12 ou caixa2.loja.local)"),
+            ));
         }
         lista.push(e.to_string());
     }

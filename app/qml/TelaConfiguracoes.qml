@@ -1783,10 +1783,19 @@ FocusScope {
                         Campo {
                             id: syncEnderecos
                             rotulo: "Endereço dos outros caixas"
-                            dica: "Só se não se acharem sozinhos (ex.: 192.168.0.12)"
+                            dica: "Só se não se acharem sozinhos (ex.: 192.168.0.12 ou caixa2.loja.local)"
                             maximo: 300
                             Layout.fillWidth: true
                         }
+                    }
+                    // E6-1 (T002 da 009): o IP que cada nome digitado deu no último ciclo (ou o erro).
+                    Nota {
+                        objectName: "nomesResolvidos"
+                        visible: !!tela.sync && !!tela.sync.nomesResolvidos && tela.sync.nomesResolvidos.length > 0
+                        text: !tela.sync || !tela.sync.nomesResolvidos ? ""
+                              : tela.sync.nomesResolvidos.map(r => r.nome + ": " + r.resultado).join(" · ")
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
                     }
                     // Só no modo completo: quem usa VPN ou rede virtual entre os caixas
                     // diz quais interfaces também valem; o resto da loja nem vê o campo.

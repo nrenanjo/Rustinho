@@ -127,6 +127,15 @@ fn p4_api_convite_e_entrada_recusados_fora_das_regras() {
             json!({ "convite": "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-F", "enderecos": "caixa-da-frente" }),
         );
         assert_eq!(r["campo"], "enderecos", "{r}");
+        // E6-1 (T002 da 009): um nome que não está na rede também vai ao campo, com o motivo.
+        assert!(r["erro"].as_str().unwrap_or("").contains("caixa-da-frente"), "{r}");
+        // E o endereço com a forma errada (o sublinhado não vale em nome), também.
+        let r = chamar(
+            &mut sn,
+            "p4_juntar_com_convite",
+            json!({ "convite": "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-F", "enderecos": "caixa_da_frente" }),
+        );
+        assert_eq!(r["campo"], "enderecos", "{r}");
         assert!(ma.encerrar(Duration::from_secs(20)));
     })
     .join()
