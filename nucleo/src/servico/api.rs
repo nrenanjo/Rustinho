@@ -676,6 +676,9 @@ pub struct Servico {
     /// QT-1b (F-02 da revisão): as operações gravadas cuja resposta ainda não se sabe se chegou à tela. Na chamada
     /// seguinte (as chamadas são uma de cada vez), elas ficam "entregues".
     por_entregar: Vec<[u8; 32]>,
+    /// B5 da R1 da 008: as senhas erradas seguidas na restauração da primeira tela (sem usuário, não há onde guardar no
+    /// banco: a contagem fica na memória) e quando foi a última.
+    erros_ao_restaurar: (u32, Option<Instant>),
 }
 
 /// Trava `<banco>.trava` só para este programa. O sistema solta sozinho se
@@ -957,6 +960,7 @@ impl Servico {
             repetida: false,
             abertura: 0,
             por_entregar: Vec::new(),
+            erros_ao_restaurar: (0, None),
         }
     }
 
@@ -1219,6 +1223,27 @@ impl Servico {
                         "Este computador já tem uma loja configurada. Para restaurar, use Configurações › Backup.",
                     ));
                 }
+                // B5 da R1 da 008: no meio de entrar numa loja que já existe, primeiro desiste dela (como ao criar
+                // uma loja nova).
+                if crate::loja::juntando(&self.banco.conn)? {
+                    return Err(Erro::validacao(
+                        "Este computador começou a entrar numa loja que já existe. Para restaurar a loja, volte e toque \
+                         em \"Voltar\" na tela de entrar na loja (isso desfaz a tentativa).",
+                    ));
+                }
+                // B5: depois de muitas senhas erradas seguidas, espera (como na entrada).
+                if let (n, Some(quando)) = self.erros_ao_restaurar {
+                    let passou = quando.elapsed().as_secs() as i64;
+                    if n >= TENTATIVAS_MAXIMAS && passou < ESPERA_APOS_ERROS {
+                        return Err(Erro::campo(
+                            "senha",
+                            format!(
+                                "Muitas senhas erradas. Espere {} segundos e tente de novo.",
+                                ESPERA_APOS_ERROS - passou
+                            ),
+                        ));
+                    }
+                }
                 let d: Restaurar = ler(dados)?;
                 let pasta = backup::pasta_padrao(self.banco.caminho.as_deref());
                 // Só uma das cópias da pasta de backup deste computador (nunca um caminho qualquer vindo da tela).
@@ -1228,6 +1253,14 @@ impl Servico {
                 let caminho = self.banco.caminho.clone();
                 let r =
                     backup::restaurar_por(&mut self.banco.conn, caminho.as_deref(), &d.arquivo, false, &d.senha, None);
+                match &r {
+                    Err(e) if e.nome_do_campo() == Some("senha") => {
+                        let n = self.erros_ao_restaurar.0.saturating_add(1);
+                        self.erros_ao_restaurar = (n, Some(Instant::now()));
+                    }
+                    Ok(_) => self.erros_ao_restaurar = (0, None),
+                    Err(_) => {}
+                }
                 // Como no backup_restaurar: o banco trocado e a restauração pela metade: nada é gravado até reabrir.
                 if r.is_err() && caminho.as_deref().is_some_and(crate::banco::restauracao_pela_metade) {
                     self.comprometido = true;

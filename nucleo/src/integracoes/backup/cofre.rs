@@ -1,12 +1,14 @@
 //! E7-2 e E7-3 da 0.9.19, etapa 7 (DRV-B (a), decisão do proprietário de 15/11/2026): o cofre contínuo no Google Drive.
 //!
 //! Além da cópia inteira do dia, este computador manda, em lotes pequenos, as alterações que **ele mesmo** gravou
-//! (`alteracao.dispositivo` = este), na ordem do registro da troca de dados e sem cortar uma operação comercial
-//! (`sync::alteracoes_desde`, PEND-35). O que veio de outros caixas não vai: cada caixa manda o que é dele.
+//! (`alteracao.dispositivo` = este), na ordem do registro da troca de dados, fechando o lote no fim de uma operação
+//! comercial (`sync::alteracoes_desde`, PEND-35). O que veio de outros caixas não vai: cada caixa manda o que é dele.
+//! **Limite (B2 da R1 da 008):** uma operação com mais de 2000 alterações (ou 16 MiB) é cortada em lotes seguidos (D54-2):
+//! uma recuperação por lotes (a D-3, depois da Beta) precisa aplicar todos os lotes da operação juntos.
 //!
 //! - **Formato:** o JSON do lote, cifrado no mesmo envelope das cópias (`embrulhar`, a chave da loja). Arquivo
 //!   `<de>-<ate>.rbl` (16 dígitos cada), imutável.
-//! - **Fila:** o lote é gerado na pasta de backup deste computador (`lotes/`), só sai de lá depois de conferido no Drive,
+//! - **Fila:** o lote é gerado na pasta de backup deste computador (`lotes/<dispositivo>/`), só sai de lá depois de conferido no Drive,
 //!   e é mandado em ordem: um lote que não confere para a fila (nenhum é pulado), e o envio seguinte recomeça dele.
 //! - **D3:** só a conferência (o tamanho e o MD5 que o próprio Drive calcula, iguais aos daqui) faz `CONFERIDO_ATE`
 //!   subir. Sem ela, nada conta.
@@ -27,7 +29,9 @@ pub(crate) const CONFERIDO_QUANDO: &str = "backup_lote_conferido_quando";
 /// Onde o cofre começou neste computador (o fim do registro na primeira volta).
 pub(crate) const LOTE_INICIO: &str = "backup_lote_inicio";
 pub(crate) const LOTE_ERRO: &str = "backup_lote_erro";
-/// Alterações por consulta ao registro (o lote fecha no fim de uma operação).
+/// B6 da R1 da 008: a última limpeza dos lotes no Drive (local).
+const LIMPEZA_QUANDO: &str = "backup_lote_limpeza";
+/// Alterações por consulta ao registro (o lote fecha no fim de uma operação; a que passa disso é cortada, B2).
 const POR_VEZ: i64 = 2000;
 
 fn ler_seq(conn: &Connection, chave: &str) -> Resultado<Option<i64>> {
@@ -70,7 +74,8 @@ pub(super) fn ler_nome_do_lote(nome: &str) -> Option<(i64, i64)> {
     Some((de.parse().ok()?, ate.parse().ok()?))
 }
 
-/// O conteúdo do próximo lote, a partir de `desde`: as alterações próprias até o fim da consulta (sem cortar operação),
+/// O conteúdo do próximo lote, a partir de `desde`: as alterações próprias até o fim da consulta (no fim de uma operação,
+/// salvo a operação maior que a consulta: B2),
 /// e até onde a consulta chegou (`ate`). `None` se o registro não tem nada depois de `desde`. Um trecho só com
 /// alterações de outros caixas dá lote vazio (`alteracoes` = []) com `ate` andando.
 pub(super) fn montar_lote(conn: &Connection, desde: i64) -> Resultado<Option<(Value, i64, bool)>> {
@@ -154,23 +159,29 @@ fn pasta_no_drive(conn: &Connection) -> Resultado<Option<String>> {
     Ok(pasta_do_caixa(conn)?.map(|p| format!("{}/lotes", p.trim_end_matches("/diarias"))))
 }
 
+/// M3 da R1 da 008: os lotes em ordem (pelo começo, em número): a fila vai do mais antigo ao mais novo, e um que falha
+/// segura os de depois. Nomes que não são de lote ficam de fora.
+pub(super) fn em_ordem(nomes: Vec<String>) -> Vec<(i64, i64, String)> {
+    let mut lotes: Vec<(i64, i64, String)> = nomes
+        .into_iter()
+        .filter_map(|nome| {
+            let (de, ate) = ler_nome_do_lote(&nome)?;
+            Some((de, ate, nome))
+        })
+        .collect();
+    lotes.sort();
+    lotes
+}
+
 /// Manda os lotes da pasta local para o Drive, em ordem, conferindo cada um (D3). Um que não confere para a fila.
 /// Devolve quantos foram conferidos nesta volta.
 pub(super) fn enviar_lotes(conn: &Connection, caminho_db: &Path) -> Resultado<usize> {
     let Some(remota) = pasta_no_drive(conn)? else { return Ok(0) };
     let pasta = pasta_local_dos_lotes(conn, caminho_db)?;
-    let mut lotes: Vec<(i64, i64, String)> = std::fs::read_dir(&pasta)
-        .map(|it| {
-            it.filter_map(|e| e.ok())
-                .filter_map(|e| {
-                    let nome = e.file_name().to_string_lossy().to_string();
-                    let (de, ate) = ler_nome_do_lote(&nome)?;
-                    Some((de, ate, nome))
-                })
-                .collect()
-        })
+    let nomes: Vec<String> = std::fs::read_dir(&pasta)
+        .map(|it| it.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).collect())
         .unwrap_or_default();
-    lotes.sort();
+    let lotes = em_ordem(nomes);
     let mut conferidos = 0;
     for (_, ate, nome) in lotes {
         let local = pasta.join(&nome);
@@ -186,7 +197,10 @@ pub(super) fn enviar_lotes(conn: &Connection, caminho_db: &Path) -> Resultado<us
                  manda de novo na próxima volta.",
             ));
         }
-        config::gravar(conn, CONFERIDO_ATE, &ate.to_string())?;
+        // B3 da R1 da 008: só sobe (um lote velho que sobrou na pasta não faz o conferido voltar).
+        if ler_seq(conn, CONFERIDO_ATE)?.is_none_or(|c| ate > c) {
+            config::gravar(conn, CONFERIDO_ATE, &ate.to_string())?;
+        }
         config::gravar(conn, CONFERIDO_QUANDO, &tempo::agora())?;
         // Conferido no Drive: a cópia local do lote sai (o Drive é o cofre).
         let _ = std::fs::remove_file(&local);
@@ -237,13 +251,24 @@ pub(super) fn limpar_lotes(conn: &Connection) -> Resultado<usize> {
 
 /// Uma volta do cofre: gera e manda. O erro fica anotado (a tela mostra), e não para o backup do dia.
 pub(super) fn volta(conn: &Connection, caminho_db: &Path) -> Resultado<usize> {
-    if !ajustes(conn, Some(caminho_db))?.nuvem {
+    // B1 da R1 da 008: sem para onde mandar (o caixa sem a identidade da loja), nada é gerado (os lotes não se acumulam).
+    if !ajustes(conn, Some(caminho_db))?.nuvem || pasta_no_drive(conn)?.is_none() {
         return Ok(0);
     }
     let r = gerar_lotes(conn, caminho_db).and_then(|_| enviar_lotes(conn, caminho_db));
     config::gravar(conn, LOTE_ERRO, &r.as_ref().err().map(|e| e.to_string()).unwrap_or_default())?;
-    // A limpeza não desfaz nada do envio; um erro nela fica para a próxima volta.
-    let _ = limpar_lotes(conn);
+    // A limpeza não desfaz nada do envio; um erro nela fica para a próxima volta. B6 da R1 da 008: no máximo uma vez
+    // por hora (ela lista a pasta dos lotes no Drive).
+    let hora_de_limpar: bool = match config::ler(conn, LIMPEZA_QUANDO)? {
+        Some(q) if !q.is_empty() => {
+            conn.query_row("SELECT ?1 <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 hour')", [&q], |l| l.get(0))?
+        }
+        _ => true,
+    };
+    if hora_de_limpar {
+        let _ = limpar_lotes(conn);
+        config::gravar(conn, LIMPEZA_QUANDO, &tempo::agora())?;
+    }
     r
 }
 
@@ -760,6 +785,102 @@ mod testes {
         assert_eq!(std::fs::read_dir(&do_segundo).unwrap().count(), 1, "o lote do segundo continua esperando por ele");
         let _ = std::fs::remove_dir_all(c1.parent().unwrap());
         let _ = std::fs::remove_dir_all(c2.parent().unwrap());
+    }
+
+    /// M3 da R1 da 008: a fila dos lotes vai em ordem, mesmo que a pasta os liste fora dela; o que não é lote fica fora.
+    #[test]
+    fn e7_3_m3_lotes_em_ordem() {
+        let nomes = vec![
+            nome_do_lote(21, 30),
+            "lixo.txt".to_string(),
+            nome_do_lote(1, 10),
+            format!(".{}.parcial", nome_do_lote(31, 40)),
+            nome_do_lote(11, 20),
+        ];
+        let ordem: Vec<(i64, i64)> = em_ordem(nomes).into_iter().map(|(de, ate, _)| (de, ate)).collect();
+        assert_eq!(ordem, vec![(1, 10), (11, 20), (21, 30)]);
+    }
+
+    /// B1 da R1 da 008: o caixa sem a identidade da loja não tem para onde mandar: nenhum lote é gerado.
+    #[test]
+    fn e7_2_b1_sem_identidade_da_loja_nao_gera_lotes() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let (b, caminho, _nuvem) = loja_de_teste("cofre-sem-loja");
+        b.conn.execute("DELETE FROM config WHERE chave = 'loja_id'", []).unwrap();
+        partida(&b.conn).unwrap();
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        assert_eq!(volta(&b.conn, &caminho).unwrap(), 0);
+        let pasta = pasta_local_dos_lotes(&b.conn, &caminho).unwrap();
+        assert_eq!(std::fs::read_dir(&pasta).map(|d| d.count()).unwrap_or(0), 0, "nenhum lote acumulado");
+        let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    }
+
+    /// B3 da R1 da 008: um lote velho que sobrou na pasta e vai de novo não faz o `CONFERIDO_ATE` voltar.
+    #[test]
+    fn e7_3_b3_conferido_so_sobe() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste do cofre pulado");
+            return;
+        }
+        let (b, caminho, nuvem) = loja_de_teste("cofre-so-sobe");
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        partida(&b.conn).unwrap();
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        assert_eq!(gerar_lotes(&b.conn, &caminho).unwrap(), 1);
+        let pasta = pasta_local_dos_lotes(&b.conn, &caminho).unwrap();
+        let velho = std::fs::read_dir(&pasta).unwrap().next().unwrap().unwrap().path();
+        let guardado = caminho.parent().unwrap().join("lote-velho");
+        std::fs::copy(&velho, &guardado).unwrap();
+        assert_eq!(enviar_lotes(&b.conn, &caminho).unwrap(), 1);
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Caio", "3333", false).unwrap();
+        assert_eq!(volta(&b.conn, &caminho).unwrap(), 1);
+        let depois = ler_seq(&b.conn, CONFERIDO_ATE).unwrap().unwrap();
+        // O velho volta para a pasta (sobrou de uma queda) e vai de novo.
+        std::fs::copy(&guardado, &velho).unwrap();
+        assert_eq!(enviar_lotes(&b.conn, &caminho).unwrap(), 1);
+        assert_eq!(ler_seq(&b.conn, CONFERIDO_ATE).unwrap(), Some(depois), "o conferido não voltou");
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    }
+
+    /// B6 da R1 da 008: a limpeza dos lotes (que lista a pasta deles no Drive) roda no máximo uma vez por hora, e não a
+    /// cada volta de um minuto.
+    #[test]
+    fn e7_5_b6_limpeza_uma_vez_por_hora() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste do cofre pulado");
+            return;
+        }
+        let (b, caminho, nuvem) = loja_de_teste("cofre-limpeza-hora");
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let pasta = caminho.parent().unwrap().to_path_buf();
+        let registro = pasta.join("chamadas.txt");
+        let falso = rclone_falso(
+            &pasta,
+            "rclone-conta.sh",
+            &format!("echo \"$@\" >> '{}'\nexec rclone \"$@\"", registro.display()),
+        );
+        std::env::set_var("RUSTINHO_RCLONE", falso.display().to_string());
+        // A limpeza só lista com a cópia do dia conferida (sem ela, nada sai e nada é listado).
+        config::gravar(&b.conn, CONFERIDA_NO_DRIVE, &json!({ "nome": "x", "seq": 1 }).to_string()).unwrap();
+        let limpezas = || {
+            std::fs::read_to_string(&registro).unwrap_or_default().lines().filter(|l| l.contains("--format pt")).count()
+        };
+        partida(&b.conn).unwrap();
+        for i in 0..3 {
+            crate::usuarios::criar(&b.conn, &b.dispositivo, &format!("Pessoa {i}"), "2222", false).unwrap();
+            volta(&b.conn, &caminho).unwrap();
+        }
+        assert_eq!(limpezas(), 1, "três voltas, uma limpeza");
+        // Passada uma hora, limpa de novo.
+        config::gravar(&b.conn, LIMPEZA_QUANDO, "2000-01-01T00:00:00Z").unwrap();
+        volta(&b.conn, &caminho).unwrap();
+        assert_eq!(limpezas(), 2);
+        std::env::remove_var("RUSTINHO_RCLONE");
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
     }
 
     /// E7-3 (D3): só a conferência faz o cofre andar; um lote mandado e conferido sai da pasta local, e um envio cortado

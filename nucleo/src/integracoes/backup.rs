@@ -43,10 +43,10 @@ use serde_json::{json, Value};
 use crate::erro::{Erro, Resultado};
 use crate::{banco, config, sync, tempo, texto};
 
-/// Começo de todo arquivo de backup do Rustinho.
 /// E7-2 a E7-4 (0.9.19, etapa 7): o cofre contínuo (lotes) e o estado da proteção.
 pub mod cofre;
 
+/// Começo de todo arquivo de backup do Rustinho.
 const MAGICA: &[u8; 8] = b"RUSTBKP1";
 const EXTENSAO: &str = "rbk";
 /// Nome da conexão do rclone com o Google Drive.
@@ -1990,7 +1990,19 @@ pub fn listar_nuvem(conn: &Connection) -> Resultado<Vec<Copia>> {
     if !loja.is_empty() {
         let pasta_loja = format!("{}/{loja}", base_nuvem());
         match rclone(
-            &["lsf", "-R", "--files-only", "--format", "ps", "--separator", "|", &pasta_loja],
+            // B6 da R1 da 008: só as pastas `diarias/` (a dos lotes pode ter milhares de arquivos).
+            &[
+                "lsf",
+                "-R",
+                "--files-only",
+                "--include",
+                "/*/diarias/*",
+                "--format",
+                "ps",
+                "--separator",
+                "|",
+                &pasta_loja,
+            ],
             Duration::from_secs(60),
         ) {
             Ok(saida) => {
@@ -2083,7 +2095,7 @@ pub fn restaurar_por(
         // E7-1: `arquivo` pode ser o caminho na pasta da loja (`<loja>/<caixa>/diarias/<nome>`); o nome é o do fim, e
         // o caminho não pode subir (`..`) nem começar na raiz.
         let base_do_nome = arquivo.rsplit('/').next().unwrap_or(arquivo);
-        if ler_nome(base_do_nome).is_none() || arquivo.split('/').any(|p| p == ".." || p.is_empty()) {
+        if ler_nome(base_do_nome).is_none() || !caminho_na_nuvem_permitido(conn, arquivo)? {
             return Err(Erro::validacao("Esse arquivo não é um backup do Rustinho."));
         }
         dizer("Baixando do Google Drive…");
@@ -2523,6 +2535,22 @@ impl Pendente {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// M3 da R1 da 008: a lista de permissão do caminho na nuvem (o que a lista da tela mostra): o nome de uma cópia de
+/// antes, na raiz; ou `<loja>/<caixa>/diarias/<nome>`, com a loja SENDO esta (sem identidade da loja, só a raiz). Os
+/// identificadores só com letras, números e "-"; nada de `..`, de "/" sobrando ou de outras pastas.
+fn caminho_na_nuvem_permitido(conn: &Connection, arquivo: &str) -> Resultado<bool> {
+    let partes: Vec<&str> = arquivo.split('/').collect();
+    let id_ok = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    Ok(match partes.as_slice() {
+        [nome] => ler_nome(nome).is_some(),
+        [loja, caixa, "diarias", nome] => {
+            let esta = crate::loja::id(conn)?;
+            !esta.is_empty() && *loja == esta && id_ok(caixa) && ler_nome(nome).is_some()
+        }
+        _ => false,
+    })
 }
 
 /// Ao abrir o banco: uma restauração que caiu no meio (D-08) termina agora.
@@ -3396,8 +3424,16 @@ pub(crate) mod testes {
         let nome_a = nome_a.clone();
         restaurar(&mut a.conn, Some(&caminho_a), &nome_a, true, "1111").unwrap();
         assert_eq!(config::nome_loja(&a.conn).unwrap(), "Loja A");
-        // Um caminho que sobe não é aceito.
-        assert!(restaurar(&mut a.conn, Some(&caminho_a), &format!("../{antiga}"), true, "1111").is_err());
+        // M3 da R1 da 008: um caminho que sobe (`..`) não é aceito, mesmo levando a uma cópia que existe e abre (a da
+        // loja B, com a mesma senha de gerente); nem o caminho direto da pasta de OUTRA loja (a lista de permissão).
+        let nome_b = da_b.iter().find(|c| c.nome.contains("/diarias/")).unwrap().nome.clone();
+        let pasta_a = nome_a.rsplit_once('/').unwrap().0;
+        let subindo = format!("{pasta_a}/../../../{nome_b}");
+        let e = restaurar(&mut a.conn, Some(&caminho_a), &subindo, true, "1111").unwrap_err().to_string();
+        assert!(e.contains("não é um backup do Rustinho"), "{e}");
+        let e = restaurar(&mut a.conn, Some(&caminho_a), &nome_b, true, "1111").unwrap_err().to_string();
+        assert!(e.contains("não é um backup do Rustinho"), "a pasta de outra loja: {e}");
+        assert_eq!(config::nome_loja(&a.conn).unwrap(), "Loja A", "nada foi restaurado");
         std::env::remove_var("RUSTINHO_REMOTO");
         let _ = std::fs::remove_dir_all(&pasta);
     }

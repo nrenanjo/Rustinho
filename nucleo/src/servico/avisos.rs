@@ -199,9 +199,6 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
     Ok(a)
 }
 
-/// Só uma não crítica aberta (em faixa) por vez. Uma base de outra versão
-/// pode ter guardado várias como abertas: fica aberta a primeira, na ordem em
-/// que aparecem. Só apresentação: nada é gravado aqui.
 /// Minutos desde uma hora (RFC 3339); 0 se não der para ler.
 fn minutos_desde(conn: &Connection, quando: &str) -> i64 {
     conn.query_row("SELECT CAST((julianday('now') - julianday(?1)) * 1440 AS INTEGER)", [quando], |l| {
@@ -212,6 +209,9 @@ fn minutos_desde(conn: &Connection, quando: &str) -> i64 {
     .unwrap_or(0)
 }
 
+/// Só uma não crítica aberta (em faixa) por vez. Uma base de outra versão
+/// pode ter guardado várias como abertas: fica aberta a primeira, na ordem em
+/// que aparecem. Só apresentação: nada é gravado aqui.
 pub fn uma_aberta(avisos: &mut [Aviso]) {
     let mut aberta = false;
     for a in avisos.iter_mut().filter(|a| a.categoria != CRITICA && !a.minimizado) {

@@ -242,6 +242,42 @@ fn e7_7_banco_vazio_oferece_restaurar_a_copia_da_pasta() {
     let _ = std::fs::remove_dir_all(&l.pasta);
 }
 
+/// B5 da R1 da 008: a restauração da primeira tela (a) não acontece no meio de entrar numa loja que já existe (como a
+/// loja nova), e (b) depois de 5 senhas erradas seguidas espera, mesmo com a senha certa.
+#[test]
+fn b5_inicio_restaurar_guarda_e_tentativas() {
+    let l = loja("b5-pend30");
+    for sufixo in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{sufixo}", l.db.display()));
+    }
+    let _vez = backup::testes::um_por_vez();
+    // (a) No meio de entrar numa loja.
+    {
+        let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+        let c = rusqlite::Connection::open(&l.db).unwrap();
+        crate::banco::registrar_funcoes(&c).unwrap();
+        crate::config::gravar(&c, "juntar_tentativa", "x").unwrap();
+        let r = chamar(&mut s, "inicio_restaurar", json!({ "arquivo": l.backup, "senha": "12345678" }));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(r.to_string().contains("começou a entrar numa loja"), "{r}");
+        assert!(!tem_peca(&l.db, "Antes do backup"), "nada foi restaurado");
+        c.execute("DELETE FROM config WHERE chave = 'juntar_tentativa'", []).unwrap();
+    }
+    // (b) Cinco senhas erradas: a sexta tentativa espera, mesmo com a senha certa.
+    let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+    for _ in 0..5 {
+        let r = chamar(&mut s, "inicio_restaurar", json!({ "arquivo": l.backup, "senha": "errada00" }));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(!r.to_string().contains("Muitas senhas erradas"), "as cinco primeiras não esperam: {r}");
+    }
+    let r = chamar(&mut s, "inicio_restaurar", json!({ "arquivo": l.backup, "senha": "12345678" }));
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(r.to_string().contains("Muitas senhas erradas"), "{r}");
+    assert!(!tem_peca(&l.db, "Antes do backup"), "nada foi restaurado");
+    drop(s);
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
 /// Sem queda: um registro na auditoria, no banco restaurado, de quem restaurou.
 #[test]
 fn m04_restaurar_registra_na_auditoria_uma_vez() {
