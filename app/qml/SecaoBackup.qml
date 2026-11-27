@@ -451,6 +451,23 @@ ColumnLayout {
             }
         }
 
+        // 3a. Conectado, mas a conexão venceu (A2 da R1 da 008; 12.1-c (a): só o gerente reconecta).
+        ColumnLayout {
+            visible: !!secao.b && secao.b.drive && !!secao.b.reconectar
+            spacing: 10
+            Layout.fillWidth: true
+            Nota {
+                text: "A conexão com o Google Drive venceu. Clique em reconectar: o navegador abre, você entra na conta "
+                      + "do Google e clica em \"Permitir\". As vendas continuam normalmente enquanto isso."
+                Layout.fillWidth: true
+            }
+            Botao {
+                text: secao.b && secao.b.ocupado ? "Esperando o navegador…" : "Reconectar ao Google Drive"
+                enabled: !!secao.b && !secao.b.ocupado
+                onClicked: secao.conectar()
+            }
+        }
+
         // 3. Conectado.
         RowLayout {
             visible: !!secao.b && secao.b.drive

@@ -1675,6 +1675,13 @@ fn rclone(args: &[&str], limite: Duration) -> Resultado<String> {
     }
 }
 
+/// E7-6 (A2 da R1 da 008): o começo do texto da credencial vencida (a tela mostra "Reconectar" com ele).
+const CREDENCIAL_VENCIDA: &str = "A conexão com o Google Drive venceu.";
+
+fn credencial_vencida(texto: &str) -> bool {
+    texto.contains(CREDENCIAL_VENCIDA)
+}
+
 fn explicar_rclone(erro: &str) -> String {
     let e = erro.to_lowercase();
     if e.contains("didn't find section")
@@ -1685,9 +1692,10 @@ fn explicar_rclone(erro: &str) -> String {
     } else if e.contains("token") && (e.contains("expired") || e.contains("invalid") || e.contains("revoked")) {
         // E7-6 (12.1-c (a), decisão de 26/11/2026): só o gerente reconecta. As vendas continuam, e o que este caixa fez
         // espera na fila (o cofre) até a conexão voltar.
-        "A conexão com o Google Drive venceu. Um gerente precisa conectar de novo, em Configurações › Backup. As \
-         vendas continuam normalmente, e nada se perde: o Rustinho manda tudo quando a conexão voltar."
-            .into()
+        format!(
+            "{CREDENCIAL_VENCIDA} Um gerente precisa conectar de novo, em Configurações › Backup. As vendas continuam \
+             normalmente, e nada se perde: o Rustinho manda tudo quando a conexão voltar."
+        )
     } else if e.contains("quota") || (e.contains("storage") && e.contains("exceeded")) {
         "O Google Drive está cheio.".into()
     } else if e.contains("no such host") || e.contains("dial tcp") || e.contains("network") || e.contains("timeout") {
@@ -1732,16 +1740,29 @@ pub fn conectar_drive(caminho_db: PathBuf) -> Resultado<()> {
     std::thread::spawn(move || {
         let _vez = vez;
         let Ok(conn) = abrir_conexao(&caminho_db) else { return };
+        let criar = || rclone(&["mkdir", &base_nuvem()], Duration::from_secs(60));
         let r = if drive_conectado() {
-            Ok(String::new())
+            // A2 da R1 da 008 (12.1-c (a): só o gerente reconecta): com a credencial vencida, o remoto continua na
+            // lista; o navegador abre de novo pelo `config reconnect`.
+            match criar() {
+                Err(e) if credencial_vencida(&e.to_string()) => {
+                    rclone(&["config", "reconnect", &format!("{REMOTO}:"), "--auto-confirm"], Duration::from_secs(300))
+                        .and_then(|_| criar())
+                }
+                outro => outro,
+            }
         } else {
             rclone(&["config", "create", REMOTO, "drive", "scope=drive.file"], Duration::from_secs(300))
+                .and_then(|_| criar())
         };
-        match r.and_then(|_| rclone(&["mkdir", &base_nuvem()], Duration::from_secs(60))) {
+        match r {
             Ok(_) => {
                 let _ = config::gravar(&conn, "backup_nuvem", "1");
                 let _ = config::gravar(&conn, "backup_nuvem_desde", &tempo::agora());
                 let _ = config::gravar(&conn, "backup_nuvem_erro", "");
+                // A conexão voltou: o cofre tenta já no próximo minuto (sem a espera das falhas).
+                let _ = config::gravar(&conn, cofre::ESPERA, "");
+                let _ = config::gravar(&conn, cofre::LOTE_ERRO, "");
                 dizer("Enviando para o Google Drive…");
                 let _ = enviar_pendentes(&conn, &caminho_db);
             }
@@ -2508,6 +2529,9 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
     let s = situacao(conn)?;
     let (rclone_ok, drive) =
         if com_drive { (rclone_instalado(), a.nuvem && drive_conectado()) } else { (false, false) };
+    // A2 da R1 da 008: a credencial venceu (na cópia do dia ou no cofre): a tela oferece "Reconectar".
+    let lote_erro = config::ler(conn, cofre::LOTE_ERRO)?.unwrap_or_default();
+    let reconectar = drive && (credencial_vencida(&s.nuvem_erro) || credencial_vencida(&lote_erro));
     Ok(json!({
         "pasta": a.pasta.display().to_string(),
         "pastaPadrao": pasta_padrao(caminho_db).display().to_string(),
@@ -2524,7 +2548,8 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
         "sincronizacao": sync::ajustes(conn)?.ligado,
         // E7-4: a proteção deste computador (nunca "em dia" sem prova).
         "protecao": cofre::protecao(conn)?,
-        "loteErro": config::ler(conn, cofre::LOTE_ERRO)?.unwrap_or_default(),
+        "loteErro": lote_erro,
+        "reconectar": reconectar,
     }))
 }
 

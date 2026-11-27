@@ -653,6 +653,76 @@ mod testes {
         }
     }
 
+    /// Espera o trabalho do backup em segundo plano terminar.
+    fn esperar_o_backup_parar() {
+        let inicio = std::time::Instant::now();
+        while super::super::ocupado() && inicio.elapsed() < Duration::from_secs(60) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(!super::super::ocupado(), "o backup não terminou");
+    }
+
+    /// A2 da R1 da 008 (12.1-c (a)): com a credencial vencida, "Conectar" de novo chama o `config reconnect` (o
+    /// navegador abre), e a conexão volta; a tela oferece "Reconectar". Controle: um erro de rede não reconecta.
+    #[test]
+    fn e7_6_a2_credencial_vencida_reconecta() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste da reconexão pulado");
+            return;
+        }
+        let (b, caminho, nuvem) = loja_de_teste("cofre-reconectar");
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let pasta = caminho.parent().unwrap().to_path_buf();
+        let registro = pasta.join("chamadas.txt");
+        let marca = pasta.join("reconectado");
+        let corpo = |erro: &str| {
+            format!(
+                "echo \"$@\" >> '{r}'\ncase \"$1\" in\n mkdir) [ -f '{m}' ] && exec rclone \"$@\"; echo '{erro}' >&2; exit 1;;\n \
+                 config) if [ \"$2\" = reconnect ]; then touch '{m}'; exit 0; fi;;\nesac\nexec rclone \"$@\"",
+                r = registro.display(),
+                m = marca.display()
+            )
+        };
+        let chamou_reconnect = || {
+            std::fs::read_to_string(&registro).unwrap_or_default().lines().any(|l| l.starts_with("config reconnect"))
+        };
+        // Controle: sem internet, nada de reconectar (o erro fica, e a tela não oferece "Reconectar").
+        let rede =
+            rclone_falso(&pasta, "rclone-sem-rede.sh", &corpo("dial tcp: lookup www.googleapis.com: no such host"));
+        std::env::set_var("RUSTINHO_RCLONE", rede.display().to_string());
+        super::super::conectar_drive(caminho.clone()).unwrap();
+        esperar_o_backup_parar();
+        assert!(!chamou_reconnect(), "erro de rede não reconecta");
+        let erro = config::ler(&b.conn, "backup_nuvem_erro").unwrap().unwrap_or_default();
+        assert!(erro.contains("Sem internet"), "{erro}");
+        assert_eq!(super::super::resumo(&b.conn, Some(&caminho), true).unwrap()["reconectar"], json!(false));
+        // A credencial vencida: a tela oferece "Reconectar".
+        let vencida = rclone_falso(
+            &pasta,
+            "rclone-vencido.sh",
+            &corpo("Failed to create file system: couldn't fetch token: token expired and there's no refresh token"),
+        );
+        std::env::set_var("RUSTINHO_RCLONE", vencida.display().to_string());
+        config::gravar(&b.conn, LOTE_ERRO, "").unwrap();
+        super::super::conectar_drive(caminho.clone()).unwrap();
+        esperar_o_backup_parar();
+        // (o falso só deixa o mkdir passar depois do reconnect: esta volta reconecta e conecta)
+        assert!(chamou_reconnect(), "a credencial vencida chama o config reconnect");
+        let linha = std::fs::read_to_string(&registro).unwrap();
+        assert!(linha.contains("config reconnect rustinho-drive: --auto-confirm"), "{linha}");
+        assert_eq!(config::ler(&b.conn, "backup_nuvem_erro").unwrap().unwrap_or_default(), "", "conectou de novo");
+        // A tela: com o erro da credencial anotado (no cofre), "Reconectar" aparece; sem ele, não.
+        std::fs::remove_file(&marca).unwrap();
+        config::gravar(&b.conn, LOTE_ERRO, &explicar_rclone("token expired")).unwrap();
+        assert_eq!(super::super::resumo(&b.conn, Some(&caminho), true).unwrap()["reconectar"], json!(true));
+        config::gravar(&b.conn, LOTE_ERRO, "").unwrap();
+        assert_eq!(super::super::resumo(&b.conn, Some(&caminho), true).unwrap()["reconectar"], json!(false));
+        std::env::remove_var("RUSTINHO_RCLONE");
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
     /// E7-3 (D3): só a conferência faz o cofre andar; um lote mandado e conferido sai da pasta local, e um envio cortado
     /// (o rclone que corta o arquivo) não conta.
     #[test]
