@@ -21,9 +21,10 @@
 //! senha e o caminho chegam como parâmetro.
 //!
 //! Submódulos: [`aprovados`] (etapa 2, registro assinado de caixas aprovados e
-//! retirados) e [`anuncio`] (etapa 3, anúncio assinado sem nada da senha da
-//! rede). Nada disto é chamado pela troca de dados ainda: ligar exige o canal
-//! autenticado (A5) e a convivência com o protocolo 3 (A4), etapas 4 a 7.
+//! retirados), [`anuncio`] (etapa 3, anúncio assinado sem nada da senha da
+//! rede), [`canal`] (o canal TLS 1.3 com as chaves cruas) e [`cofre`] (a chave
+//! deste caixa fora do banco). Desde a 0.9.19-dev.2 (004), tudo isto está ligado
+//! à troca de dados da loja: `troca/sync/p4.rs` e `troca/sync/fio.rs`.
 
 use std::io::Write;
 use std::path::Path;
