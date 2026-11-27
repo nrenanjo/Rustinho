@@ -178,9 +178,12 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
             "encomendas" | "encomendas_numero_repetido" => "Ver encomendas",
             "oficina" => "Ver ordens de serviço",
             // Caso 8 (C8, 0.9.18): o modo seguro leva ao Backup (restaurar).
-            "backup" | "backup_nuvem" | "backup_sem_tranca" | "backup_chave_nao_confirmada" | "banco_defeito" => {
-                "Ver backup"
-            }
+            "backup"
+            | "backup_nuvem"
+            | "backup_protecao"
+            | "backup_sem_tranca"
+            | "backup_chave_nao_confirmada"
+            | "banco_defeito" => "Ver backup",
             // NOTIF-01 (0.9.18): o botão abre Simultaneidade › Duplicatas.
             "conflitos" | "codigos" | "codigos_bloqueio" => "Ver duplicatas",
             "referencias" | "referencias_atrasadas" | "outra_loja" => "Ver caixas",
@@ -198,6 +201,16 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
 /// Só uma não crítica aberta (em faixa) por vez. Uma base de outra versão
 /// pode ter guardado várias como abertas: fica aberta a primeira, na ordem em
 /// que aparecem. Só apresentação: nada é gravado aqui.
+/// Minutos desde uma hora (RFC 3339); 0 se não der para ler.
+fn minutos_desde(conn: &Connection, quando: &str) -> i64 {
+    conn.query_row("SELECT CAST((julianday('now') - julianday(?1)) * 1440 AS INTEGER)", [quando], |l| {
+        l.get::<_, Option<i64>>(0)
+    })
+    .ok()
+    .flatten()
+    .unwrap_or(0)
+}
+
 pub fn uma_aberta(avisos: &mut [Aviso]) {
     let mut aberta = false;
     for a in avisos.iter_mut().filter(|a| a.categoria != CRITICA && !a.minimizado) {
@@ -1126,6 +1139,39 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
                 .secao("backup"),
             );
         }
+    }
+    // E7-4 (P-10 (a) e a resposta do proprietário de 26/11/2026, perto da meia-noite): a proteção contínua. O Início só
+    // avisa quando algo deste caixa passa de 5 minutos sem prova no Drive (no minuto normal do envio, não); com mais de
+    // 24 h, crítico. Na tela de Backup o pendente aparece sempre.
+    let p = backup::cofre::protecao(conn)?;
+    if (p.nivel == "atencao" || p.nivel == "critico") && p.desde.as_deref().is_some_and(|d| minutos_desde(conn, d) >= 5)
+    {
+        let critico = p.nivel == "critico";
+        let mut a = Aviso::simples(
+            "backup_protecao",
+            &hoje,
+            "Backup".into(),
+            if critico {
+                "Há operações deste caixa fora do Google Drive há mais de um dia".into()
+            } else {
+                "Há operações deste caixa que ainda não chegaram ao Google Drive".into()
+            },
+            String::new(),
+            "configuracoes",
+        )
+        .categoria(if critico { CRITICA } else { ATENCAO })
+        .secao("backup");
+        a.descricao = format!(
+            "{} {}. Confira a internet e a conexão com o Google em Configurações › Backup. As vendas continuam \
+             normalmente: o Rustinho manda sozinho quando der.",
+            p.pendentes,
+            if p.pendentes == 1 {
+                "operação ainda não está no Google Drive"
+            } else {
+                "operações ainda não estão no Google Drive"
+            }
+        );
+        avisos.push(a);
     }
     // F02 (passo 6.7, DP-32): já houve backup e a loja ainda não tem a chave
     // (nenhum gerente entrou): as cópias saem sem tranca. O Drive recusa essas

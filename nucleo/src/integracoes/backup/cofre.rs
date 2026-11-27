@@ -394,6 +394,35 @@ mod testes {
         assert_eq!(protecao(&b.conn).unwrap().nivel, "atencao", "a posterior à cópia continua pendente");
     }
 
+    /// E7-4 no Início (resposta do proprietário de 26/11, perto da meia-noite): no minuto normal do envio, nenhum aviso;
+    /// pendente há 5 min ou mais, Atenção; há mais de 24 h, Crítico.
+    #[test]
+    fn e7_4_aviso_no_inicio_so_depois_de_5_minutos() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let (b, _caminho, _nuvem) = loja_de_teste("cofre-aviso");
+        let aviso = |b: &Banco| {
+            crate::avisos::do_dia(&b.conn).unwrap().into_iter().find(|a| a.id == "backup_protecao").map(|a| a.categoria)
+        };
+        let fim: i64 = b.conn.query_row("SELECT MAX(seq) FROM alteracao", [], |l| l.get(0)).unwrap();
+        config::gravar(&b.conn, CONFERIDO_ATE, &fim.to_string()).unwrap();
+        assert_eq!(aviso(&b), None, "em dia: sem aviso");
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "atencao");
+        assert_eq!(aviso(&b), None, "pendente há segundos (o minuto normal do envio): sem aviso no Início");
+        let mudar = |b: &Banco, quanto: &str| {
+            b.conn
+                .execute(
+                    "UPDATE alteracao SET quando = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?2) WHERE seq > ?1",
+                    params![fim, quanto],
+                )
+                .unwrap();
+        };
+        mudar(&b, "-6 minutes");
+        assert_eq!(aviso(&b).as_deref(), Some("atencao"), "pendente há 6 min: Atenção");
+        mudar(&b, "-25 hours");
+        assert_eq!(aviso(&b).as_deref(), Some("critica"), "pendente há mais de 24 h: Crítico");
+    }
+
     #[test]
     fn nome_do_lote_ida_e_volta() {
         assert_eq!(ler_nome_do_lote(&nome_do_lote(5, 1234)), Some((5, 1234)));

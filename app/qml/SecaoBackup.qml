@@ -278,7 +278,20 @@ ColumnLayout {
                                  : secao.b.situacao.nuvemErro !== "" ? "No Google Drive: " + secao.b.situacao.nuvemErro
                                  : secao.b.situacao.nuvemUltimo ? "No Google Drive: enviado " + secao.quando(secao.b.situacao.nuvemUltimo)
                                  : "No Google Drive: esperando o primeiro envio" }
-                    ]
+                    ].concat(!secao.b.nuvem || !secao.b.protecao ? [] : [
+                        // E7-4 (P-10, decisão do proprietário de 26/11/2026): nunca "em dia" sem a prova do Google Drive.
+                        { ok: secao.b.protecao.nivel === "em_dia",
+                          ruim: secao.b.protecao.nivel === "critico",
+                          texto: secao.b.protecao.nivel === "em_dia"
+                                 ? "Proteção contínua: em dia (o que este caixa fez está no Google Drive, conferido)"
+                                 : (secao.b.protecao.nivel === "critico" ? "Proteção contínua: atrasada há mais de um dia"
+                                                                          : "Proteção contínua: pendente")
+                                   + (secao.b.protecao.desde ? " desde " + secao.quando(secao.b.protecao.desde) : "")
+                                   + " (" + secao.b.protecao.pendentes
+                                   + (secao.b.protecao.pendentes === 1 ? " operação deste caixa ainda não está" : " operações deste caixa ainda não estão")
+                                   + " no Google Drive)"
+                                   + (secao.b.loteErro ? ". " + secao.b.loteErro : ". O Rustinho manda sozinho em seguida.") }
+                    ])
                     delegate: RowLayout {
                         required property var modelData
                         spacing: 8
