@@ -264,3 +264,25 @@ fn drv_beta_o_programa_sai_sem_o_google_drive() {
     assert!(!ids.iter().any(|i| i.starts_with("backup_nuvem") || i == "backup_protecao"), "{ids:?}");
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// B3 da R4 da 008 (o B5 da R3): sem o Google Drive nesta versão, a tela de Backup (o resumo) nunca chama o rclone, nem
+/// o `rclone version`. Um rclone falso anota cada chamada.
+#[cfg(unix)]
+#[test]
+fn drv_beta_o_resumo_nao_chama_o_rclone() {
+    use std::os::unix::fs::PermissionsExt;
+    let pasta = std::env::temp_dir().join(format!("rustinho-drv-beta-rclone-{}", std::process::id()));
+    std::fs::create_dir_all(&pasta).unwrap();
+    let registro = pasta.join("chamadas.txt");
+    let falso = pasta.join("rclone-falso.sh");
+    std::fs::write(&falso, format!("#!/bin/sh\necho \"$@\" >> '{}'\nexit 0\n", registro.display())).unwrap();
+    std::fs::set_permissions(&falso, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::env::set_var("RUSTINHO_RCLONE", &falso);
+    let b = rustinho_nucleo::banco::Banco::em_memoria().unwrap();
+    rustinho_nucleo::config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+    let r = rustinho_nucleo::backup::resumo(&b.conn, None, true).unwrap();
+    std::env::remove_var("RUSTINHO_RCLONE");
+    assert_eq!(r["rclone"], json!(false), "{r}");
+    assert!(!registro.exists(), "o rclone foi chamado: {:?}", std::fs::read_to_string(&registro));
+    let _ = std::fs::remove_dir_all(&pasta);
+}

@@ -50,8 +50,10 @@ env:
   CARGO_TERM_COLOR: always
   # Testes do núcleo que abrem portas: rodam em série, à parte (os outros, em
   # paralelo). Juntos são exatamente todos os testes.
-  TESTES_DE_REDE: "rede_local:: sync:: testes_supervisao::"
-  PULAR_REDE: "--skip rede_local:: --skip sync:: --skip testes_supervisao::"
+  # B7 da R4 da 008 (27/11/2026): o troca::caminhos:: mede tempo (o t16 exige menos de 3 s) e reprova com a máquina
+  # carregada: vai no grupo serial, como os outros de rede.
+  TESTES_DE_REDE: "rede_local:: sync:: testes_supervisao:: caminhos::"
+  PULAR_REDE: "--skip rede_local:: --skip sync:: --skip testes_supervisao:: --skip caminhos::"
 
 jobs:
   # L0: formatação, clippy e a forma do portão.

@@ -257,6 +257,12 @@ ColumnLayout {
                   : "A restauração não terminou. Nada foi perdido: os dados de antes estão guardados."
             Layout.fillWidth: true
         }
+        // B6 da R4 da 008: sem nenhum dos dois caminhos (a cópia era do Drive e não há a de antes), o caminho é a lista.
+        Nota {
+            visible: !!secao.b && !!secao.b.interrompida && !secao.b.interrompida.tentar && !secao.b.interrompida.voltar
+            text: "Para restaurar, escolha uma cópia na lista abaixo."
+            Layout.fillWidth: true
+        }
         RowLayout {
             spacing: 12
             Botao {

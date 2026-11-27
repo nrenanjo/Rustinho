@@ -37,8 +37,9 @@ import time
 from datetime import datetime, timezone
 
 RAIZ_PADRAO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TESTES_DE_REDE = ["rede_local::", "sync::", "testes_supervisao::"]
-PULAR_REDE = ["--skip", "rede_local::", "--skip", "sync::", "--skip", "testes_supervisao::"]
+# B7 da R4 da 008: o troca::caminhos:: mede tempo; vai no grupo serial.
+TESTES_DE_REDE = ["rede_local::", "sync::", "testes_supervisao::", "caminhos::"]
+PULAR_REDE = ["--skip", "rede_local::", "--skip", "sync::", "--skip", "testes_supervisao::", "--skip", "caminhos::"]
 
 
 def detectar_linker_env(env):

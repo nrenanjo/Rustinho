@@ -25,8 +25,9 @@ env:
   RCLONE_VERSAO: "v1.68.2"
   RUST_VERSAO: "1.97.0"
   CARGO_TERM_COLOR: always
-  TESTES_DE_REDE: "rede_local:: sync:: testes_supervisao::"
-  PULAR_REDE: "--skip rede_local:: --skip sync:: --skip testes_supervisao::"
+  # B7 da R4 da 008: o troca::caminhos:: mede tempo; vai no grupo serial (como no validar.yml).
+  TESTES_DE_REDE: "rede_local:: sync:: testes_supervisao:: caminhos::"
+  PULAR_REDE: "--skip rede_local:: --skip sync:: --skip testes_supervisao:: --skip caminhos::"
 
 jobs:
   nucleo-windows:

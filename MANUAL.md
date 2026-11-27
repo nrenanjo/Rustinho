@@ -97,6 +97,7 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 
 ### Novo na versão 0.9.19
 
+- **Backup nesta Beta:** o Google Drive fica desligado e volta na versão 0.9.20. As cópias ficam neste computador e no pen drive. Num computador novo (ou reinstalado), a primeira tela oferece "Restaurar de um pen drive ou outra pasta".
 - **Regras do dia a dia (decisões do dono, 24 e 25/11/2026):**
   - **Olho de Hórus:** com o olho fechado, somem o custo, o % de lucro (com os títulos deles), os valores das telas de
     resultados e os saldos e totais do Caixa. O preço de venda continua à vista e, na ficha da peça, sobe para o lugar
@@ -211,7 +212,7 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 - **Caixa já fechado não muda mais (D-14):** cancelar uma venda, estornar um recebimento ou desfazer uma devolução de um caixa que **já foi fechado** não mexe no fechamento daquele dia (ele continua como foi impresso). O dinheiro que sai (cancelamento, estorno) ou volta (devolução desfeita) fica **na gaveta aberta deste computador**, como sangria ou suprimento com o nome da operação ("Cancelamento da venda 12 · Caixa 1 (caixa já fechado)"). Sem caixa aberto, vai para o **Caixa geral** ("Acerto de caixa já fechado"). Pix e cartão não mexem em gaveta. Se a gaveta não tiver dinheiro bastante para devolver, o Rustinho recusa e nada muda. Venda do caixa que ainda está aberto: como sempre.
 - **Caixa aberto em outro computador (0.9.19):** a mesma regra vale quando a operação é de um caixa que está **aberto em outro computador**: a gaveta de lá nunca muda (no resumo de lá aparece "Desfeitas depois do fechamento ou em outro computador"); o dinheiro sai (ou entra) na gaveta aberta deste computador ou no Caixa geral. O estorno de um pagamento que saiu da gaveta de outro caixa também volta na gaveta aberta deste computador (sem ela, no Caixa geral).
 - **Operação ligada a um registro que ainda espera a troca de dados (0.9.19):** cancelar a venda, estornar o recebimento ou a compra e abater o crediário numa devolução conferem antes os cheques, as parcelas e as contas ligadas. Se algum ainda espera a troca de dados (ou ficou inconsistente), nada é feito e o Rustinho diz qual registro é; faça de novo quando a troca terminar.
-- **Rustinho portátil (para testar no Windows sem instalar):** um ZIP com tudo dentro. O arquivo `rustinho-portatil.txt` ao lado do `rustinho.exe` liga o modo portátil: os dados, os backups e a ligação com o Google Drive ficam na pasta `dados`, dentro da pasta do ZIP; o Rustinho instalado no computador não é aberto nem mudado; a troca de dados só conversa com outro Rustinho portátil (portas 47820 e 47821, e outra chave, mesmo com a mesma senha da rede). Para apagar o teste, apague a pasta. Instruções no `LEIA-ME.txt` do ZIP.
+- **Rustinho portátil (para testar no Windows sem instalar):** um ZIP com tudo dentro. O arquivo `rustinho-portatil.txt` ao lado do `rustinho.exe` liga o modo portátil: os dados e os backups ficam na pasta `dados`, dentro da pasta do ZIP; o Rustinho instalado no computador não é aberto nem mudado; a troca de dados só conversa com outro Rustinho portátil (portas 47820 e 47821, e outra chave, mesmo com a mesma senha da rede). Para apagar o teste, apague a pasta. Instruções no `LEIA-ME.txt` do ZIP.
 - **Troca de dados (D-16):** uma configuração que é só deste computador (a identidade do caixa, a senha da rede) não é mais aceita se chegar pela rede; as da loja continuam chegando.
 - **Compras (D-15):** quando a compra muda o custo e o preço fica, o % de lucro abaixo do custo sai com o arredondamento certo.
 
@@ -295,7 +296,7 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 - **Câmera como leitor:** no Vender e em Peças, o botão de câmera no fim da busca lê o código de barras da embalagem ou da etiqueta (EAN, Code 128, Code 39 e QR).
 - **Voltar do celular** faz o mesmo que o Esc: volta uma tela. Na primeira tela, fecha o app (o backup é feito antes).
 - **Junto com os caixas:** na primeira vez, escolha "Já uso o Rustinho na loja: juntar" e use a senha da rede da loja; o celular precisa estar no mesmo Wi-Fi.
-- **Backup:** fica no próprio aparelho. O Google Drive fica com os computadores da loja (lá estão todos os dados, os do celular também).
+- **Backup:** fica no próprio aparelho. Um computador da loja guarda as cópias de todos os dados, os do celular também.
 - **XML, zip e rar:** escolha o arquivo pelo seletor do Android (Downloads, WhatsApp, Drive...). No celular não tem "escolher uma pasta".
 - **Telas menores no computador:** a janela do Rustinho também se ajeita quando fica estreita.
 
@@ -320,8 +321,8 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
   1. O programa que leva os arquivos (rclone) já vem no instalador do Windows e no AppImage. Compilando no Linux, instale o `rclone` pelo gerenciador de pacotes.
   2. Em Backup, clique em **Conectar ao Google Drive** (até a 0.9.1, antes era preciso criar a senha do backup). O navegador abre: entre na conta do Google e clique em **Permitir**. O Rustinho não vê a senha do Google e só enxerga os arquivos que ele mesmo mandar (pasta "Rustinho Backup").
   3. Pronto: cada cópia do dia vai também para o Drive. Faça isso em um caixa só (o que fica mais tempo ligado).
-- **Restaurar:** escolha a cópia na lista (deste computador, do Google Drive ou "Abrir outro arquivo…" de um pen drive). Antes, o Rustinho guarda uma cópia de agora ("antes de restaurar"), então dá para desfazer. O nome do caixa, a sincronização e os ajustes do backup deste computador ficam como estão. Com a sincronização ligada, os outros caixas mandam de volta o que mudou depois da data da cópia.
-- **Avisos no Início:** quando o último backup falha, quando passam 2 dias sem backup ou 2 dias sem nada chegar ao Google Drive.
+- **Restaurar:** escolha a cópia na lista (deste computador ou "Abrir outro arquivo…" de um pen drive; na 0.9.20, também do Google Drive). Antes, o Rustinho guarda uma cópia de agora ("antes de restaurar"), então dá para desfazer. O nome do caixa, a sincronização e os ajustes do backup deste computador ficam como estão. Com a sincronização ligada, os outros caixas mandam de volta o que mudou depois da data da cópia.
+- **Avisos no Início:** quando o último backup falha ou quando passam 2 dias sem backup (e, a partir da 0.9.20, 2 dias sem nada chegar ao Google Drive).
 - **Compras:** se o XML não é da loja (outro CNPJ), a nota mostra o aviso e deixa lançar mesmo assim. Sem o CNPJ da loja nas Configurações, lembra de preencher.
 
 ### Novo na versão 0.6.0: Ordem de serviço (oficina)

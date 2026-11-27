@@ -1174,7 +1174,8 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             a.descricao =
                 "A restauração parou no meio (falta de luz ou o Rustinho fechou). O Rustinho não abre a loja \
                  pela metade, e os dados de antes estão guardados na cópia de antes da restauração. Confira os dados: \
-                 em Configurações › Backup dá para tentar de novo ou voltar aos dados de antes."
+                 em Configurações › Backup o Rustinho mostra o que dá para fazer (tentar de novo, voltar aos dados de \
+                 antes ou escolher outra cópia da lista)."
                     .into();
             avisos.push(a);
         }
@@ -1933,6 +1934,9 @@ mod testes {
 
     #[test]
     fn avisa_backup() {
+        // B1 da R4 da 008: estes testes leem o Drive (o interruptor global dos testes): a mesma trava dos testes do
+        // backup, para um teste do DRV-BETA nunca desligar o Drive no meio deles.
+        let _trava = crate::backup::testes::um_por_vez();
         let b = Banco::em_memoria().unwrap();
         assert!(!do_dia(&b.conn).unwrap().iter().any(|a| a.id == "backup"));
         config::gravar(&b.conn, "backup_desde", &crate::tempo::dias_atras(3)).unwrap();
@@ -1957,6 +1961,9 @@ mod testes {
     /// "&lt;". Era a sonda `sonda_rev3_erro_do_backup_…` da revisão.
     #[test]
     fn rc3_3_erro_do_backup_chega_sem_entidades() {
+        // B1 da R4 da 008: estes testes leem o Drive (o interruptor global dos testes): a mesma trava dos testes do
+        // backup, para um teste do DRV-BETA nunca desligar o Drive no meio deles.
+        let _trava = crate::backup::testes::um_por_vez();
         let b = Banco::em_memoria().unwrap();
         let erro = "Não deu para gravar na pasta /home/ze/Peças & Cia <loja>";
         config::gravar(&b.conn, "backup_erro", erro).unwrap();
