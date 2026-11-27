@@ -206,6 +206,10 @@ FICAM = [
     ("TelaReceber.qml", "Pronto", "feito.close()", "conclusão (Enter) do recibo; não é voltar nem cancelar"),
     ("TelaVender.qml", "Nova venda", "concluida.close()", "conclusão (Enter) da venda; não é voltar nem cancelar"),
     ("SecaoPagar.qml", "Pronto", "categorias.close()", "conclusão da edição das categorias (cada mudança já foi gravada)"),
+    # M6 da R1 da 008 (ES-3 (a), decisão do proprietário de 26/11/2026, com o texto decidido): restaura a cópia de antes
+    # de uma restauração interrompida (pela confirmação e pela senha de um gerente). Mexe nos dados; não é navegação.
+    ("SecaoBackup.qml", "Voltar aos dados de antes", "secao.perguntarRestaurar(secao.b.interrompida.voltar)",
+     "restaura a cópia de antes (ES-3 (a)); não é navegação"),
 ]
 
 ROTULO_DE_VOLTA = re.compile(r"^(Cancelar|Voltar|Fechar|Desistir|Sair|Continuar sem rascunho)")

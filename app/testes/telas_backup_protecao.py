@@ -2,7 +2,7 @@
 """T005 da 008 (E7-4; P-10 e a resposta do proprietário de 26/11/2026): a linha "Proteção contínua" em
 Configurações › Backup.
 
-Dois casos, com o Google Drive ligado (backup_nuvem = 1) e sem conexão de verdade com o Google:
+DRV-BETA (27/11/2026): a 0.9.19 Beta sai sem o Google Drive (ver os casos). Antes, com o Drive:
 - SEM PROVA: nada do que este caixa fez foi conferido no Drive. A linha diz "pendente", e nunca "em dia";
 - COM PROVA: o cofre diz que tudo está conferido (os lotes conferidos de 0 até acima do registro). A linha diz "em dia".
   É também o controle positivo de que a linha muda com a prova, e não é um texto fixo.
@@ -25,6 +25,7 @@ PENDENTE = "Proteção contínua: pendente"
 EM_DIA = "Proteção contínua: em dia"
 TENTAR = "Tentar de novo"
 VOLTAR = "Voltar aos dados de antes"
+SEM_DRIVE = "O Google Drive volta na versão 0.9.20. As cópias continuam neste computador e no pen drive."
 INTERROMPIDA = "A restauração não terminou. Nada foi perdido: os dados de antes estão guardados."
 
 
@@ -71,15 +72,16 @@ def main():
     placar = Placar()
     try:
         casos = [
-            ("sem_prova", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_nuvem', '1');",
-             PENDENTE, [EM_DIA]),
-            ("com_prova", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_nuvem', '1'); "
-                          "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_lote_conferido_ate', '999999999'); "
-                          # A1 da R1 da 008: os lotes conferidos cobrem desde o começo do registro.
-                          "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_lote_inicio', '0');",
-             EM_DIA, [PENDENTE]),
+            # DRV-BETA (decisão do proprietário de 27/11/2026): a Beta sai sem o Google Drive. A loja que ligou o Drive
+            # numa versão anterior (com prova ou sem) não vê a proteção contínua, e vê que o Drive volta na 0.9.20.
+            # As linhas "pendente" e "em dia" continuam no código, testadas no núcleo; a prova delas na tela volta
+            # com o Drive, na 0.9.20.
+            ("drive_de_antes", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_nuvem', '1'); "
+                               "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_lote_conferido_ate', '999999999'); "
+                               "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_lote_inicio', '0');",
+             SEM_DRIVE, [PENDENTE, EM_DIA, "Conectar ao Google Drive"]),
             ("sem_cofre", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_nuvem', '0');",
-             None, [PENDENTE, EM_DIA, TENTAR, VOLTAR]),
+             SEM_DRIVE, [PENDENTE, EM_DIA, TENTAR, VOLTAR]),
             # M6 da R1 da 008 (ES-3 (a)): a restauração interrompida mostra os dois botões (o sem_cofre é o controle).
             ("interrompida", "INSERT OR REPLACE INTO config (chave, valor) VALUES ('backup_restauracao_interrompida', "
                              "json_object('terminouAgora', json('false'), 'quando', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), "

@@ -131,6 +131,19 @@ jobs:
           key: cargo-Linux-nucleo-${{ matrix.perfil }}-mold-rust${{ env.RUST_VERSAO }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             cargo-Linux-nucleo-${{ matrix.perfil }}-mold-rust${{ env.RUST_VERSAO }}-
+      # 27/11/2026: o rclone fixado (o mesmo dos pacotes), para os testes do backup e do cofre rodarem de verdade.
+      # Antes, sem ele, esses testes pulavam e contavam como aprovados; com RUSTINHO_EXIGIR_RCLONE, a falta reprova.
+      - name: rclone para os testes do backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o rclone.zip "https://github.com/rclone/rclone/releases/download/$RCLONE_VERSAO/rclone-$RCLONE_VERSAO-linux-amd64.zip"
+          echo "0e6fa18051e67fc600d803a2dcb10ddedb092247fc6eee61be97f64ec080a13c  rclone.zip" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          unzip -q -j rclone.zip '*/rclone' -d "$HOME/.local/bin/"
+          rm rclone.zip
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "RUSTINHO_EXIGIR_RCLONE=1" >> "$GITHUB_ENV"
       # Contas que passariam do tamanho do número viram erro nos dois modos
       # (overflow-checks no Cargo.toml).
       - name: Testes do núcleo (${{ matrix.perfil }})

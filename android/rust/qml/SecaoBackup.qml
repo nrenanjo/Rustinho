@@ -405,14 +405,23 @@ ColumnLayout {
     Faixa {
         visible: !Tema.celular
         titulo: "Google Drive"
-        subtitulo: !secao.b ? "" : secao.b.drive ? "conectado · pasta “Rustinho Backup”" : "cópia fora da loja, de graça"
+        subtitulo: !secao.b ? "" : !secao.b.driveNaVersao ? "volta na versão 0.9.20"
+                   : secao.b.drive ? "conectado · pasta “Rustinho Backup”" : "cópia fora da loja, de graça"
         color: Tema.azul
         corTitulo: Tema.azulEscuro
         Layout.fillWidth: true
 
+        // 0. DRV-BETA (decisão do proprietário de 27/11/2026): a 0.9.19 Beta sai sem o Google Drive.
+        Nota {
+            objectName: "driveForaDaVersao"
+            visible: !!secao.b && !secao.b.driveNaVersao
+            text: "O Google Drive volta na versão 0.9.20. As cópias continuam neste computador e no pen drive."
+            Layout.fillWidth: true
+        }
+
         // 1. Falta o rclone.
         ColumnLayout {
-            visible: !!secao.b && !secao.b.rclone
+            visible: !!secao.b && secao.b.driveNaVersao && !secao.b.rclone
             spacing: 10
             Layout.fillWidth: true
             Nota {
@@ -460,7 +469,7 @@ ColumnLayout {
 
         // 2. Instalado, falta conectar.
         ColumnLayout {
-            visible: !!secao.b && secao.b.rclone && !secao.b.drive
+            visible: !!secao.b && secao.b.driveNaVersao && secao.b.rclone && !secao.b.drive
             spacing: 10
             Layout.fillWidth: true
             Nota {

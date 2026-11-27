@@ -97,6 +97,8 @@ CLASSES = {
     ("SecaoPagar.qml", "lancamento.fornecedor ? [] : lancamento.achados"): ("FORA", MENU),
     ("SecaoPagar.qml", "lancamento.previa"): ("FORA", PREVIA),
     ("SecaoPagar.qml", "secao.opcoes.formas"): ("FORA", ESCOLHA),
+    # B7 da R1 da 008: as cópias para escolher na primeira tela (até 5 botões), não registros.
+    ("TelaBoasVindas.qml", "tela.copias.slice(0, 5)"): ("FORA", ESCOLHA),
     ("SecaoPagar.qml", "ficha.dados ? ficha.dados.pagamentos"): ("LISTA", "pagamentos de uma conta"),
     ("SecaoPagar.qml", "categorias.itens"): ("FORA", D_V5 + " (categorias)"),
     ("SecaoParados.qml", "secao.dados ? secao.dados.itens"): ("LISTA", "peças paradas"),

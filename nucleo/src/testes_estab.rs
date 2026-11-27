@@ -433,8 +433,8 @@ fn estab_baixar_do_drive_nao_para_a_troca_de_dados() {
     let lento = l.pasta.join("rclone-lento.sh");
     std::fs::write(&lento, "#!/bin/sh\nif [ \"$1\" = copyto ]; then sleep 3; fi\nexec rclone \"$@\"\n").unwrap();
     std::fs::set_permissions(&lento, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
-    std::env::set_var("RUSTINHO_RCLONE", lento.display().to_string());
+    let _ambiente_1 = backup::testes::ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
+    let _ambiente_2 = backup::testes::ambiente("RUSTINHO_RCLONE", lento.display().to_string());
     let db = l.db.clone();
     let tarefa = std::thread::spawn(move || {
         let mut b = crate::banco::Banco::abrir(&db).unwrap();

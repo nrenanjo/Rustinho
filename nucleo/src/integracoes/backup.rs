@@ -63,6 +63,28 @@ pub const DIAS_NO_DRIVE: i64 = 90;
 pub const GAVETA_DA_RESTAURACAO: &str = "backup_gaveta_da_restauracao";
 /// E7-9 (ES-3 (a)): uma restauração que caiu no meio foi resolvida nesta abertura (local; o aviso do Início dura 3 dias).
 pub const RESTAURACAO_INTERROMPIDA: &str = "backup_restauracao_interrompida";
+/// O texto quando o Google Drive é pedido nesta versão.
+pub const SEM_DRIVE_NESTA_VERSAO: &str =
+    "O Google Drive volta na versão 0.9.20. As cópias continuam neste computador e no pen drive.";
+/// DRV-BETA (decisão do proprietário de 27/11/2026): a 0.9.19 Beta sai **sem o Google Drive**. A credencial
+/// compartilhada do rclone vai parar de funcionar em 2026, e a chave própria (a 12.1) fica para a 0.9.20. O código do
+/// Drive e do cofre continua aqui e testado (os testes ligam o Drive por `DRIVE_NOS_TESTES`); no programa, desligado.
+pub const DRIVE_NESTA_VERSAO: bool = false;
+/// Só nos testes da biblioteca: o Drive fica ligado, para exercitar o código da 0.9.20. Os testes do DRV-BETA o
+/// desligam com `testes::SemDrive` (sob a trava `UM_POR_VEZ`). O valor do programa (`DRIVE_NESTA_VERSAO`) é conferido
+/// fora da biblioteca, em `nucleo/tests/contratos.rs`.
+#[cfg(test)]
+pub(crate) static DRIVE_NOS_TESTES: AtomicBool = AtomicBool::new(true);
+
+/// O Google Drive existe nesta versão?
+pub fn drive_disponivel() -> bool {
+    #[cfg(test)]
+    if DRIVE_NOS_TESTES.load(Ordering::SeqCst) {
+        return true;
+    }
+    DRIVE_NESTA_VERSAO
+}
+
 /// Horário do backup do dia se ninguém mudar.
 pub const HORA_PADRAO: &str = "18:00";
 /// Cópias mais novas de cada caixa que nunca são apagadas.
@@ -386,7 +408,9 @@ pub fn ajustes(conn: &Connection, caminho_db: Option<&Path>) -> Resultado<Ajuste
         .filter(|d| (1..=365).contains(d))
         .unwrap_or(DIAS_PADRAO);
     let hora = config::ler(conn, "backup_hora")?.filter(|h| hora_valida(h)).unwrap_or_else(|| HORA_PADRAO.to_string());
-    Ok(Ajustes { pasta, dias, hora, nuvem: config::ligado(conn, "backup_nuvem")?, publica: publica_da_loja(conn)? })
+    // DRV-BETA: sem o Drive nesta versão, nada vai para lá, mesmo com o ajuste ligado numa versão anterior.
+    let nuvem = drive_disponivel() && config::ligado(conn, "backup_nuvem")?;
+    Ok(Ajustes { pasta, dias, hora, nuvem, publica: publica_da_loja(conn)? })
 }
 
 fn hora_valida(h: &str) -> bool {
@@ -1732,6 +1756,9 @@ pub fn drive_conectado() -> bool {
 /// Abre o navegador para a pessoa entrar na conta do Google. Espera até 5
 /// minutos. Só dá acesso aos arquivos que o próprio Rustinho criar.
 pub fn conectar_drive(caminho_db: PathBuf) -> Resultado<()> {
+    if !drive_disponivel() {
+        return Err(Erro::validacao(SEM_DRIVE_NESTA_VERSAO));
+    }
     if !rclone_instalado() {
         return Err(Erro::validacao(falta_rclone()));
     }
@@ -1983,6 +2010,9 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
 /// caixas da loja). O `nome` é o caminho a partir da raiz do Rustinho no Drive (o que `restaurar` baixa); as de outra loja
 /// na mesma conta não aparecem.
 pub fn listar_nuvem(conn: &Connection) -> Resultado<Vec<Copia>> {
+    if !drive_disponivel() {
+        return Ok(Vec::new());
+    }
     let mut achadas: Vec<(String, i64, String)> =
         nomes_na_nuvem(&base_nuvem())?.into_iter().map(|(n, t)| (n.clone(), t, String::new())).collect();
     let loja = config::ler(conn, "loja_id")?.unwrap_or_default();
@@ -2091,6 +2121,9 @@ pub fn restaurar_por(
     })?;
     let tmp = Temporaria::nova(&pasta_privada(caminho_db))?;
 
+    if nuvem && !drive_disponivel() {
+        return Err(Erro::validacao(SEM_DRIVE_NESTA_VERSAO));
+    }
     let local = if nuvem {
         // E7-1: `arquivo` pode ser o caminho na pasta da loja (`<loja>/<caixa>/diarias/<nome>`); o nome é o do fim, e
         // o caminho não pode subir (`..`) nem começar na raiz.
@@ -2662,6 +2695,8 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
         "nuvem": a.nuvem,
         "rclone": rclone_ok,
         "drive": drive,
+        // DRV-BETA: a tela troca a parte do Google Drive pelo aviso de que ele volta na 0.9.20.
+        "driveNaVersao": drive_disponivel(),
         "situacao": s,
         "ocupado": ocupado(),
         "fazendo": fazendo(),
@@ -2698,8 +2733,81 @@ pub(crate) mod testes {
 
     /// A mesma vez, para os testes de outros módulos que restauram ou mexem
     /// nas variáveis do rclone.
+    /// Cada teste começa com as variáveis do rclone limpas: um teste que parou no meio (sem chegar ao `remove_var`)
+    /// não deixa o seguinte achar que o rclone não está instalado e pular como aprovado (achado em 27/11/2026).
     pub(crate) fn um_por_vez() -> std::sync::MutexGuard<'static, ()> {
-        UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner())
+        let trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("RUSTINHO_RCLONE");
+        std::env::remove_var("RUSTINHO_REMOTO");
+        trava
+    }
+
+    /// Uma variável de ambiente só durante o teste: volta ao valor de antes ao sair, **mesmo se o teste falhar**. Antes,
+    /// um teste que parava no meio deixava o `RUSTINHO_RCLONE` apontando para um rclone falso, e os testes seguintes
+    /// achavam que o rclone não estava instalado, pulavam e contavam como aprovados (27/11/2026).
+    pub(crate) struct Ambiente {
+        nome: &'static str,
+        antes: Option<std::ffi::OsString>,
+    }
+
+    pub(crate) fn ambiente(nome: &'static str, valor: impl AsRef<std::ffi::OsStr>) -> Ambiente {
+        let antes = std::env::var_os(nome);
+        std::env::set_var(nome, valor);
+        Ambiente { nome, antes }
+    }
+
+    impl Drop for Ambiente {
+        fn drop(&mut self) {
+            match &self.antes {
+                Some(v) => std::env::set_var(self.nome, v),
+                None => std::env::remove_var(self.nome),
+            }
+        }
+    }
+
+    /// Os testes que precisam do rclone pulam sem ele, salvo com `RUSTINHO_EXIGIR_RCLONE` (a CI), em que reprovam.
+    /// Antes, na CI sem o rclone, todos esses testes pulavam e contavam como aprovados (27/11/2026).
+    pub(crate) fn rclone_para_teste() -> bool {
+        if rclone_instalado() {
+            return true;
+        }
+        assert!(
+            std::env::var_os("RUSTINHO_EXIGIR_RCLONE").is_none(),
+            "o rclone é exigido (RUSTINHO_EXIGIR_RCLONE) e não está instalado"
+        );
+        false
+    }
+
+    /// 27/11/2026: (a) cada teste começa com as variáveis do rclone limpas, mesmo que o anterior tenha parado no meio;
+    /// (b) com `RUSTINHO_EXIGIR_RCLONE`, a falta do rclone reprova em vez de pular.
+    #[test]
+    fn testes_comecam_limpos_e_a_ci_exige_o_rclone() {
+        {
+            let _trava = um_por_vez();
+            // Um teste "para no meio" com o rclone falso apontado.
+            std::env::set_var("RUSTINHO_RCLONE", "/nao/existe/rclone");
+        }
+        let _trava = um_por_vez();
+        assert!(std::env::var_os("RUSTINHO_RCLONE").is_none(), "o próximo teste começa sem o rclone falso");
+        let _falso = ambiente("RUSTINHO_RCLONE", "/nao/existe/rclone");
+        let _exige = ambiente("RUSTINHO_EXIGIR_RCLONE", "1");
+        assert!(std::panic::catch_unwind(rclone_para_teste).is_err(), "sem o rclone, com a exigência, reprova");
+    }
+
+    /// DRV-BETA: o Drive desligado, como no programa, só durante o teste (volta a ligar ao sair, mesmo com falha).
+    pub(crate) struct SemDrive;
+
+    impl SemDrive {
+        pub(crate) fn agora() -> SemDrive {
+            DRIVE_NOS_TESTES.store(false, Ordering::SeqCst);
+            SemDrive
+        }
+    }
+
+    impl Drop for SemDrive {
+        fn drop(&mut self) {
+            DRIVE_NOS_TESTES.store(true, Ordering::SeqCst);
+        }
     }
 
     pub(super) fn pasta_teste(nome: &str) -> PathBuf {
@@ -2875,7 +2983,7 @@ pub(crate) mod testes {
     /// e sai no backup seguinte.
     #[test]
     fn f01_queda_no_meio_do_backup_nao_deixa_copia_sem_tranca_no_destino() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let privada = pasta_teste("f01-privada");
         let destino = pasta_teste("f01-destino");
         let caminho = privada.join("rustinho.db");
@@ -3034,7 +3142,7 @@ pub(crate) mod testes {
     /// (3) o próximo gerente que entra ganha uma chave nova, e os backups seguintes abrem com a senha dele.
     #[test]
     fn o_ultimo_cadeado_dos_backups_nao_some_em_silencio() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("cadeado");
         let caminho = pasta.join("rustinho.db");
         let b = Banco::abrir(&caminho).unwrap();
@@ -3094,7 +3202,7 @@ pub(crate) mod testes {
     /// guardá-lo no lugar do bom do mesmo dia.
     #[test]
     fn backup_sem_nenhum_cadeado_nao_fica_na_pasta() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("sem-cadeado");
         let caminho = pasta.join("rustinho.db");
         let b = Banco::abrir(&caminho).unwrap();
@@ -3121,7 +3229,7 @@ pub(crate) mod testes {
     /// retenção segue como sempre.
     #[test]
     fn com_a_chave_dos_backups_nao_confirmada_nada_antigo_e_apagado() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("chave-nao-confirmada");
         let caminho = pasta.join("rustinho.db");
         let b = Banco::abrir(&caminho).unwrap();
@@ -3151,7 +3259,7 @@ pub(crate) mod testes {
 
     #[test]
     fn fazer_conferir_e_restaurar() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("ciclo");
         let caminho = pasta.join("rustinho.db");
         let mut b = Banco::abrir(&caminho).unwrap();
@@ -3242,7 +3350,7 @@ pub(crate) mod testes {
     #[test]
     fn caixa_restaurado_nao_reusa_codigos_da_faixa() {
         use crate::faixas::para_testes::*;
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let (mut a, u) = loja("Caixa A");
         let pasta = pasta_teste("faixa");
         let caminho = pasta.join("rustinho.db");
@@ -3331,15 +3439,15 @@ pub(crate) mod testes {
 
     #[test]
     fn nuvem_pelo_rclone() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         // Usa uma pasta comum no lugar do Google Drive (o rclone trata igual).
-        if !rclone_instalado() {
+        if !rclone_para_teste() {
             eprintln!("rclone não instalado: teste da nuvem pulado");
             return;
         }
         let pasta = pasta_teste("nuvem");
         let nuvem = pasta.join("drive");
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_1 = ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         let caminho = pasta.join("rustinho.db");
         let mut b = Banco::abrir(&caminho).unwrap();
         config::gravar(&b.conn, "loja_nome", "Na Nuvem").unwrap();
@@ -3375,15 +3483,15 @@ pub(crate) mod testes {
     /// Drive não traz o nome do caixa, e a cópia de antes (na raiz) continua na lista da loja que a mandou.
     #[test]
     fn e7_1_duas_lojas_na_mesma_conta_nao_se_misturam() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = um_por_vez();
+        if !rclone_para_teste() {
             eprintln!("rclone não instalado: teste da nuvem pulado");
             return;
         }
         let pasta = pasta_teste("nuvem-duas-lojas");
         let nuvem = pasta.join("drive");
         std::fs::create_dir_all(&nuvem).unwrap();
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_2 = ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         let loja = |nome: &str, caixa: &str, id: &str| {
             let caminho = pasta.join(nome).join("rustinho.db");
             std::fs::create_dir_all(caminho.parent().unwrap()).unwrap();
@@ -3443,7 +3551,7 @@ pub(crate) mod testes {
     /// mesma cópia restaurada no próprio computador dá o aviso de sempre (o da gaveta deste caixa), e não este.
     #[test]
     fn e7_8_m2_gaveta_do_computador_de_antes() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("gaveta-de-outro");
         let ca = pasta.join("a").join("rustinho.db");
         let cb = pasta.join("b").join("rustinho.db");
@@ -3499,7 +3607,7 @@ pub(crate) mod testes {
     /// fechada: sem aviso.
     #[test]
     fn e7_8_gaveta_aberta_na_copia_volta_aberta_com_aviso() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("gaveta-restaurada");
         let caminho = pasta.join("rustinho.db");
         let mut b = Banco::abrir(&caminho).unwrap();
@@ -3562,14 +3670,14 @@ pub(crate) mod testes {
     /// 7 (a pasta do computador segue o ajuste). Com 7 dias, a de 60 dias saía.
     #[test]
     fn e7_5_no_drive_as_copias_ficam_90_dias() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = um_por_vez();
+        if !rclone_para_teste() {
             eprintln!("rclone não instalado: teste da nuvem pulado");
             return;
         }
         let pasta = pasta_teste("nuvem-90-dias");
         let nuvem = pasta.join("drive");
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_3 = ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         let caminho = pasta.join("rustinho.db");
         let b = Banco::abrir(&caminho).unwrap();
         config::gravar(&b.conn, "loja_id", "0193dddd-dddd-7ddd-dddd-dddddddddddd").unwrap();
@@ -3625,7 +3733,7 @@ pub(crate) mod testes {
     /// o banco (o automático tenta de novo a cada 5 minutos, e cada tentativa copiava o banco inteiro à toa).
     #[test]
     fn sem_cadeado_a_recusa_vem_antes_de_copiar_o_banco() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("sem-cadeado-cedo");
         let caminho = pasta.join("rustinho.db");
         let b = Banco::abrir(&caminho).unwrap();
@@ -3650,15 +3758,15 @@ pub(crate) mod testes {
     /// que abrem).
     #[test]
     fn drive_nao_apaga_as_antigas_com_a_chave_nao_confirmada() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = um_por_vez();
+        if !rclone_para_teste() {
             eprintln!("rclone não instalado: teste da nuvem pulado");
             return;
         }
         let pasta = pasta_teste("nuvem-chave");
         let nuvem = pasta.join("drive");
         std::fs::create_dir_all(&nuvem).unwrap();
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_4 = ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         let caminho = pasta.join("rustinho.db");
         let b = Banco::abrir(&caminho).unwrap();
         config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
@@ -3714,7 +3822,7 @@ pub(crate) mod testes {
     /// confirmada, não avisa.
     #[test]
     fn avisa_quando_as_copias_antigas_nao_estao_sendo_apagadas() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("aviso-chave");
         let caminho = pasta.join("rustinho.db");
         let b = Banco::abrir(&caminho).unwrap();
@@ -3747,7 +3855,7 @@ pub(crate) mod testes {
     /// com a senha certa. Agora, fora de uma transação, a chave dos backups pega a vez de gravar logo no começo.
     #[test]
     fn a_troca_de_dados_gravando_no_meio_nao_derruba_o_login_do_gerente() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("login-no-meio");
         let caminho = pasta.join("rustinho.db");
         let b = Banco::abrir(&caminho).unwrap();
@@ -3782,15 +3890,15 @@ pub(crate) mod testes {
     /// de um não apaga as cópias do outro; as próprias antigas saem.
     #[test]
     fn drive_nao_apaga_copias_de_outro_computador() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = um_por_vez();
+        if !rclone_para_teste() {
             eprintln!("rclone não instalado: teste da nuvem pulado");
             return;
         }
         let pasta = pasta_teste("nuvem-outro");
         let nuvem = pasta.join("drive");
         std::fs::create_dir_all(&nuvem).unwrap();
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_5 = ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         let caminho = pasta.join("rustinho.db");
         let b = Banco::abrir(&caminho).unwrap();
         config::gravar(&b.conn, "loja_nome", "Loja A").unwrap();
@@ -3853,8 +3961,8 @@ pub(crate) mod testes {
     /// nome igual bastava, nada era enviado e a cópia ruim contava como feita.
     #[test]
     fn d3_copia_ruim_no_drive_e_enviada_de_novo_e_conferida() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = um_por_vez();
+        if !rclone_para_teste() {
             eprintln!("rclone não instalado: teste da nuvem pulado");
             return;
         }
@@ -3891,8 +3999,8 @@ pub(crate) mod testes {
     #[test]
     fn d3_envio_cortado_nao_conta_como_guardado() {
         use std::os::unix::fs::PermissionsExt;
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = um_por_vez();
+        if !rclone_para_teste() {
             eprintln!("rclone não instalado: teste da nuvem pulado");
             return;
         }
@@ -3913,7 +4021,7 @@ pub(crate) mod testes {
         .unwrap();
         std::fs::set_permissions(&cortador, std::fs::Permissions::from_mode(0o755)).unwrap();
         fazer(&caminho, false).unwrap();
-        std::env::set_var("RUSTINHO_RCLONE", cortador.display().to_string());
+        let _ambiente_7 = ambiente("RUSTINHO_RCLONE", cortador.display().to_string());
         let r = enviar_pendentes(&b.conn, &caminho);
         std::env::remove_var("RUSTINHO_RCLONE");
         let s = situacao(&b.conn).unwrap();
@@ -3941,7 +4049,7 @@ pub(crate) mod testes {
     /// andamento, a mesma restauração funciona.
     #[test]
     fn estab_restaurar_e_backup_nao_andam_juntos() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("juntos");
         let caminho = pasta.join("rustinho.db");
         let mut b = Banco::abrir(&caminho).unwrap();
@@ -3983,7 +4091,7 @@ pub(crate) mod testes {
     /// gravada e nem a cópia de antes é feita.
     #[test]
     fn estab_backup_estragado_nao_muda_nada() {
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let pasta = pasta_teste("estragado");
         let caminho = pasta.join("rustinho.db");
         let mut b = Banco::abrir(&caminho).unwrap();
@@ -4149,7 +4257,7 @@ pub(crate) mod testes {
     #[test]
     fn backup_de_outra_linha_e_recusado_antes_de_trocar_o_banco() {
         use std::io::Write as _;
-        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = um_por_vez();
         let amostras = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("amostras_dev3");
         for amostra in ["dev3_estrutura24.db", "dev3_estrutura25.db"] {
             let pasta = pasta_teste("outra-linha");

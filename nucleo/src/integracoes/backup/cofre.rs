@@ -363,7 +363,8 @@ fn seq_da_copia_conferida(conn: &Connection) -> Resultado<Option<i64>> {
 }
 
 pub fn protecao(conn: &Connection) -> Resultado<Protecao> {
-    if config::ler(conn, "backup_nuvem")?.as_deref() != Some("1") {
+    // DRV-BETA: sem o Drive nesta versão, não há cofre (mesmo com o ajuste ligado numa versão anterior).
+    if !super::drive_disponivel() || config::ler(conn, "backup_nuvem")?.as_deref() != Some("1") {
         return Ok(Protecao { nivel: "sem_cofre".into(), pendentes: 0, desde: None });
     }
     let este = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
@@ -432,7 +433,7 @@ mod testes {
     /// E7-2: o lote leva só as alterações deste computador, começa no fim do registro da primeira volta e anda.
     #[test]
     fn e7_2_lote_leva_so_as_alteracoes_deste_computador() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = super::super::testes::um_por_vez();
         let (b, caminho, _nuvem) = loja_de_teste("cofre-proprias");
         // Antes do cofre: o que já existe fica para a cópia do dia.
         let inicio = partida(&b.conn).unwrap();
@@ -461,7 +462,7 @@ mod testes {
     /// aberto que uma versão anterior tenha deixado na pasta dos lotes também sai.
     #[test]
     fn e7_2_lote_aberto_nunca_na_pasta_de_destino() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = super::super::testes::um_por_vez();
         let (b, caminho, _nuvem) = loja_de_teste("cofre-aberto-fora");
         let destino = caminho.parent().unwrap().join("destino");
         std::fs::create_dir_all(&destino).unwrap();
@@ -536,13 +537,13 @@ mod testes {
     /// a volta do cofre acontece do mesmo jeito.
     #[test]
     fn e7_2_m5_o_cofre_nao_espera_o_backup_do_dia() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = super::super::testes::um_por_vez();
+        if !super::super::testes::rclone_para_teste() {
             eprintln!("rclone não instalado: teste do cofre pulado");
             return;
         }
         let (b, caminho, nuvem) = loja_de_teste("cofre-vez-propria");
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_1 = super::super::testes::ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         partida(&b.conn).unwrap();
         crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
         let ocupado = super::super::Vez::pegar("Mandando a cópia do dia…").expect("o backup do dia estava livre");
@@ -563,14 +564,14 @@ mod testes {
     /// Drive no meio; um acerto zera a espera.
     #[test]
     fn e7_2_m5_espera_crescente_depois_de_falhas() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = super::super::testes::um_por_vez();
         assert_eq!((1..=7).map(espera_depois_de).collect::<Vec<_>>(), vec![60, 120, 240, 480, 900, 900, 900]);
         let (b, caminho, nuvem) = loja_de_teste("cofre-espera");
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_2 = super::super::testes::ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         let pasta = caminho.parent().unwrap().to_path_buf();
         let registro = pasta.join("chamadas.txt");
         let falso = rclone_falso(&pasta, "rclone-fora.sh", &format!("echo \"$1\" >> '{}'\nexit 1", registro.display()));
-        std::env::set_var("RUSTINHO_RCLONE", falso.display().to_string());
+        let _ambiente_3 = super::super::testes::ambiente("RUSTINHO_RCLONE", falso.display().to_string());
         partida(&b.conn).unwrap();
         crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
         let chamadas = || std::fs::read_to_string(&registro).unwrap_or_default().lines().count();
@@ -616,7 +617,7 @@ mod testes {
     /// a vez dele e, se não vier, diz para tentar de novo.
     #[test]
     fn e7_2_m5_restauracao_espera_o_cofre() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = super::super::testes::um_por_vez();
         let (mut b, caminho, _nuvem) = loja_de_teste("cofre-restauracao");
         let cofre = super::super::VezDoCofre::pegar().expect("o cofre estava livre");
         super::super::limites_de_teste::COFRE_NA_RESTAURACAO.with(|c| c.set(Some(1)));
@@ -637,13 +638,13 @@ mod testes {
     /// limite (20 s; aqui 1 s, com um Drive que demora 5 s).
     #[test]
     fn e7_2_b8_ao_fechar_o_cofre_manda_o_que_falta() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = super::super::testes::um_por_vez();
+        if !super::super::testes::rclone_para_teste() {
             eprintln!("rclone não instalado: teste do cofre pulado");
             return;
         }
         let (b, caminho, nuvem) = loja_de_teste("cofre-ao-fechar");
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_4 = super::super::testes::ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         partida(&b.conn).unwrap();
         crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
         super::super::ao_fechar(&caminho).unwrap();
@@ -652,7 +653,7 @@ mod testes {
         // Um Drive lento não segura o fechar além do limite.
         crate::usuarios::criar(&b.conn, &b.dispositivo, "Caio", "3333", false).unwrap();
         let lento = rclone_falso(caminho.parent().unwrap(), "rclone-lento.sh", "sleep 5\nexec rclone \"$@\"");
-        std::env::set_var("RUSTINHO_RCLONE", lento.display().to_string());
+        let _ambiente_5 = super::super::testes::ambiente("RUSTINHO_RCLONE", lento.display().to_string());
         super::super::limites_de_teste::COFRE_AO_FECHAR.with(|c| c.set(Some(1)));
         let inicio = std::time::Instant::now();
         super::super::cofre_ao_fechar(&caminho);
@@ -696,13 +697,13 @@ mod testes {
     /// navegador abre), e a conexão volta; a tela oferece "Reconectar". Controle: um erro de rede não reconecta.
     #[test]
     fn e7_6_a2_credencial_vencida_reconecta() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = super::super::testes::um_por_vez();
+        if !super::super::testes::rclone_para_teste() {
             eprintln!("rclone não instalado: teste da reconexão pulado");
             return;
         }
         let (b, caminho, nuvem) = loja_de_teste("cofre-reconectar");
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_6 = super::super::testes::ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         let pasta = caminho.parent().unwrap().to_path_buf();
         let registro = pasta.join("chamadas.txt");
         let marca = pasta.join("reconectado");
@@ -720,7 +721,7 @@ mod testes {
         // Controle: sem internet, nada de reconectar (o erro fica, e a tela não oferece "Reconectar").
         let rede =
             rclone_falso(&pasta, "rclone-sem-rede.sh", &corpo("dial tcp: lookup www.googleapis.com: no such host"));
-        std::env::set_var("RUSTINHO_RCLONE", rede.display().to_string());
+        let _ambiente_7 = super::super::testes::ambiente("RUSTINHO_RCLONE", rede.display().to_string());
         super::super::conectar_drive(caminho.clone()).unwrap();
         esperar_o_backup_parar();
         assert!(!chamou_reconnect(), "erro de rede não reconecta");
@@ -733,7 +734,7 @@ mod testes {
             "rclone-vencido.sh",
             &corpo("Failed to create file system: couldn't fetch token: token expired and there's no refresh token"),
         );
-        std::env::set_var("RUSTINHO_RCLONE", vencida.display().to_string());
+        let _ambiente_8 = super::super::testes::ambiente("RUSTINHO_RCLONE", vencida.display().to_string());
         config::gravar(&b.conn, LOTE_ERRO, "").unwrap();
         super::super::conectar_drive(caminho.clone()).unwrap();
         esperar_o_backup_parar();
@@ -757,8 +758,8 @@ mod testes {
     /// Drive.
     #[test]
     fn e7_2_m4_pasta_de_backup_compartilhada_nao_mistura_lotes() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = super::super::testes::um_por_vez();
+        if !super::super::testes::rclone_para_teste() {
             eprintln!("rclone não instalado: teste do cofre pulado");
             return;
         }
@@ -777,7 +778,7 @@ mod testes {
         let do_segundo = pasta_local_dos_lotes(&b2.conn, &c2).unwrap();
         assert!(do_segundo.ends_with(&b2.dispositivo), "{}", do_segundo.display());
         // O primeiro faz a volta dele: manda só o seu.
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_9 = super::super::testes::ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         assert_eq!(volta(&b1.conn, &c1).unwrap(), 1);
         std::env::remove_var("RUSTINHO_REMOTO");
         let no_drive = nuvem.join("0193cccc-cccc-7ccc-cccc-cccccccccccc").join(&b1.dispositivo).join("lotes");
@@ -804,7 +805,7 @@ mod testes {
     /// B1 da R1 da 008: o caixa sem a identidade da loja não tem para onde mandar: nenhum lote é gerado.
     #[test]
     fn e7_2_b1_sem_identidade_da_loja_nao_gera_lotes() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = super::super::testes::um_por_vez();
         let (b, caminho, _nuvem) = loja_de_teste("cofre-sem-loja");
         b.conn.execute("DELETE FROM config WHERE chave = 'loja_id'", []).unwrap();
         partida(&b.conn).unwrap();
@@ -818,13 +819,13 @@ mod testes {
     /// B3 da R1 da 008: um lote velho que sobrou na pasta e vai de novo não faz o `CONFERIDO_ATE` voltar.
     #[test]
     fn e7_3_b3_conferido_so_sobe() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = super::super::testes::um_por_vez();
+        if !super::super::testes::rclone_para_teste() {
             eprintln!("rclone não instalado: teste do cofre pulado");
             return;
         }
         let (b, caminho, nuvem) = loja_de_teste("cofre-so-sobe");
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_10 = super::super::testes::ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         partida(&b.conn).unwrap();
         crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
         assert_eq!(gerar_lotes(&b.conn, &caminho).unwrap(), 1);
@@ -848,13 +849,13 @@ mod testes {
     /// cada volta de um minuto.
     #[test]
     fn e7_5_b6_limpeza_uma_vez_por_hora() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = super::super::testes::um_por_vez();
+        if !super::super::testes::rclone_para_teste() {
             eprintln!("rclone não instalado: teste do cofre pulado");
             return;
         }
         let (b, caminho, nuvem) = loja_de_teste("cofre-limpeza-hora");
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_11 = super::super::testes::ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         let pasta = caminho.parent().unwrap().to_path_buf();
         let registro = pasta.join("chamadas.txt");
         let falso = rclone_falso(
@@ -862,7 +863,7 @@ mod testes {
             "rclone-conta.sh",
             &format!("echo \"$@\" >> '{}'\nexec rclone \"$@\"", registro.display()),
         );
-        std::env::set_var("RUSTINHO_RCLONE", falso.display().to_string());
+        let _ambiente_12 = super::super::testes::ambiente("RUSTINHO_RCLONE", falso.display().to_string());
         // A limpeza só lista com a cópia do dia conferida (sem ela, nada sai e nada é listado).
         config::gravar(&b.conn, CONFERIDA_NO_DRIVE, &json!({ "nome": "x", "seq": 1 }).to_string()).unwrap();
         let limpezas = || {
@@ -883,17 +884,37 @@ mod testes {
         let _ = std::fs::remove_dir_all(&pasta);
     }
 
+    /// DRV-BETA (27/11/2026): sem o Drive nesta versão, mesmo com o ajuste ligado (de uma versão anterior), o cofre não
+    /// gera lote, a proteção fica "sem_cofre", o Início não avisa, e restaurar pela nuvem é recusado.
+    #[test]
+    fn drv_beta_sem_drive_o_cofre_fica_parado() {
+        let _trava = super::super::testes::um_por_vez();
+        let _sem_drive = super::super::testes::SemDrive::agora();
+        let (mut b, caminho, _nuvem) = loja_de_teste("cofre-sem-drive");
+        partida(&b.conn).unwrap();
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        assert_eq!(volta(&b.conn, &caminho).unwrap(), 0);
+        let pasta = pasta_local_dos_lotes(&b.conn, &caminho).unwrap();
+        assert_eq!(std::fs::read_dir(&pasta).map(|d| d.count()).unwrap_or(0), 0, "nenhum lote");
+        assert_eq!(protecao(&b.conn).unwrap().nivel, "sem_cofre");
+        let ids: Vec<String> = crate::avisos::do_dia(&b.conn).unwrap().into_iter().map(|a| a.id).collect();
+        assert!(!ids.iter().any(|i| i == "backup_protecao"), "{ids:?}");
+        let e = super::super::restaurar_por(&mut b.conn, Some(&caminho), "x.rbk", true, "1111", None).unwrap_err();
+        assert!(e.to_string().contains("volta na versão 0.9.20"), "{e}");
+        let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    }
+
     /// E7-3 (D3): só a conferência faz o cofre andar; um lote mandado e conferido sai da pasta local, e um envio cortado
     /// (o rclone que corta o arquivo) não conta.
     #[test]
     fn e7_3_so_o_lote_conferido_conta() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = super::super::testes::um_por_vez();
+        if !super::super::testes::rclone_para_teste() {
             eprintln!("rclone não instalado: teste do cofre pulado");
             return;
         }
         let (b, caminho, nuvem) = loja_de_teste("cofre-conferido");
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_13 = super::super::testes::ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         partida(&b.conn).unwrap();
         crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
         assert_eq!(volta(&b.conn, &caminho).unwrap(), 1);
@@ -914,7 +935,7 @@ mod testes {
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&cortador, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::env::set_var("RUSTINHO_RCLONE", cortador.display().to_string());
+        let _ambiente_14 = super::super::testes::ambiente("RUSTINHO_RCLONE", cortador.display().to_string());
         assert!(volta(&b.conn, &caminho).is_err());
         std::env::remove_var("RUSTINHO_RCLONE");
         assert_eq!(ler_seq(&b.conn, CONFERIDO_ATE).unwrap(), Some(ate), "o cortado não fez o cofre andar");
@@ -932,7 +953,7 @@ mod testes {
     /// foto DELA tem (o `seq`).
     #[test]
     fn e7_4_protecao_so_com_prova() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = super::super::testes::um_por_vez();
         let (b, _caminho, _nuvem) = loja_de_teste("cofre-protecao");
         config::gravar(&b.conn, "backup_nuvem", "0").unwrap();
         assert_eq!(protecao(&b.conn).unwrap().nivel, "sem_cofre", "Drive desligado: não se declara protegido");
@@ -978,7 +999,7 @@ mod testes {
     /// fica coberto por ela. (O caso "entre a foto e o nome" não é encenável aqui: a prova dele é a leitura na foto.)
     #[test]
     fn e7_4_m1_a_copia_guarda_o_seq_da_foto() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = super::super::testes::um_por_vez();
         let (b, caminho, _nuvem) = loja_de_teste("cofre-seq-da-foto");
         crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
         let antes: i64 = b
@@ -995,7 +1016,7 @@ mod testes {
 
     #[test]
     fn e7_4_a1_primeira_volta_nao_cobre_o_historico() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = super::super::testes::um_por_vez();
         let (b, _caminho, _nuvem) = loja_de_teste("cofre-primeira-volta");
         let antes = protecao(&b.conn).unwrap();
         assert_eq!(antes.nivel, "atencao");
@@ -1017,7 +1038,7 @@ mod testes {
     /// pendente há 5 min ou mais, Atenção; há mais de 24 h, Crítico.
     #[test]
     fn e7_4_aviso_no_inicio_so_depois_de_5_minutos() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _trava = super::super::testes::um_por_vez();
         let (b, _caminho, _nuvem) = loja_de_teste("cofre-aviso");
         let aviso = |b: &Banco| {
             crate::avisos::do_dia(&b.conn).unwrap().into_iter().find(|a| a.id == "backup_protecao").map(|a| a.categoria)
@@ -1047,13 +1068,13 @@ mod testes {
     /// 10 dias se a cópia conferida é mais velha que ele.
     #[test]
     fn e7_5_lotes_ficam_7_dias_e_so_saem_cobertos_pela_copia() {
-        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        if !rclone_instalado() {
+        let _trava = super::super::testes::um_por_vez();
+        if !super::super::testes::rclone_para_teste() {
             eprintln!("rclone não instalado: teste do cofre pulado");
             return;
         }
         let (b, caminho, nuvem) = loja_de_teste("cofre-limpeza");
-        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let _ambiente_15 = super::super::testes::ambiente("RUSTINHO_REMOTO", nuvem.display().to_string());
         let remota = pasta_no_drive(&b.conn).unwrap().unwrap();
         std::fs::create_dir_all(&remota).unwrap();
         let lote = |nome: &str, dias: u64| {

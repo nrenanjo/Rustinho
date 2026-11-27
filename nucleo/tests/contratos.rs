@@ -237,3 +237,25 @@ fn gerente_backup_e_caixas() {
     // Resolver conflito que não existe: erro, não sucesso.
     erro(&mut s, "conflito_resolver", json!({ "id": 999, "usar": true }));
 }
+
+/// DRV-BETA (decisão do proprietário de 27/11/2026): a 0.9.19 Beta sai sem o Google Drive. Aqui, fora da biblioteca, o
+/// núcleo é compilado como no programa (sem os testes ligando o Drive): ligar o Drive é recusado, a lista da nuvem vem
+/// vazia e a tela é avisada.
+#[test]
+fn drv_beta_o_programa_sai_sem_o_google_drive() {
+    assert!(!rustinho_nucleo::backup::DRIVE_NESTA_VERSAO);
+    assert!(!rustinho_nucleo::backup::drive_disponivel());
+    let pasta = std::env::temp_dir().join(format!("rustinho-drv-beta-{}", std::process::id()));
+    std::fs::create_dir_all(&pasta).unwrap();
+    let texto = rustinho_nucleo::backup::conectar_drive(pasta.join("rustinho.db")).unwrap_err().to_string();
+    assert!(texto.contains("volta na versão 0.9.20"), "{texto}");
+    let b = rustinho_nucleo::banco::Banco::em_memoria().unwrap();
+    // Mesmo com o ajuste ligado numa versão anterior, nada vai para o Drive.
+    rustinho_nucleo::config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+    let r = rustinho_nucleo::backup::resumo(&b.conn, None, true).unwrap();
+    assert_eq!(r["driveNaVersao"], json!(false), "{r}");
+    assert_eq!(r["nuvem"], json!(false), "{r}");
+    assert_eq!(r["drive"], json!(false), "{r}");
+    assert!(rustinho_nucleo::backup::listar_nuvem(&b.conn).unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(&pasta);
+}
