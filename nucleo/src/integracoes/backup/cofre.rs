@@ -457,6 +457,7 @@ mod testes {
         assert_eq!(gerar_lotes(&b.conn, &caminho).unwrap(), 0);
     }
 
+    #[cfg(unix)]
     /// A3 da R1 da 008 (regra F01): o lote aberto nunca é gravado na pasta de destino. Numa queda logo depois de
     /// gravar o aberto, ele fica só na pasta temporária da pasta privada (só do usuário) e sai na volta seguinte; o
     /// aberto que uma versão anterior tenha deixado na pasta dos lotes também sai.
@@ -525,6 +526,7 @@ mod testes {
         assert!(super::super::VezDoCofre::esperar(Duration::from_secs(30)).is_some(), "o cofre não parou");
     }
 
+    #[cfg(unix)]
     fn rclone_falso(pasta: &Path, nome: &str, corpo: &str) -> PathBuf {
         let p = pasta.join(nome);
         std::fs::write(&p, format!("#!/bin/sh\n{corpo}\n")).unwrap();
@@ -560,6 +562,7 @@ mod testes {
         let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
     }
 
+    #[cfg(unix)]
     /// M5 da R1 da 008: depois de uma falha, o temporizador espera mais a cada vez (1, 2, 4, 8, 15 min), sem chamar o
     /// Drive no meio; um acerto zera a espera.
     #[test]
@@ -634,6 +637,7 @@ mod testes {
         let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
     }
 
+    #[cfg(unix)]
     /// B8 e M5 da R1 da 008: ao fechar, o cofre manda o que falta para o Drive; e não segura o fechar mais que o
     /// limite (20 s; aqui 1 s, com um Drive que demora 5 s).
     #[test]
@@ -693,6 +697,7 @@ mod testes {
         assert!(!super::super::ocupado(), "o backup não terminou");
     }
 
+    #[cfg(unix)]
     /// A2 da R1 da 008 (12.1-c (a)): com a credencial vencida, "Conectar" de novo chama o `config reconnect` (o
     /// navegador abre), e a conexão volta; a tela oferece "Reconectar". Controle: um erro de rede não reconecta.
     #[test]
@@ -845,6 +850,7 @@ mod testes {
         let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
     }
 
+    #[cfg(unix)]
     /// B6 da R1 da 008: a limpeza dos lotes (que lista a pasta deles no Drive) roda no máximo uma vez por hora, e não a
     /// cada volta de um minuto.
     #[test]
@@ -904,6 +910,7 @@ mod testes {
         let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
     }
 
+    #[cfg(unix)]
     /// E7-3 (D3): só a conferência faz o cofre andar; um lote mandado e conferido sai da pasta local, e um envio cortado
     /// (o rclone que corta o arquivo) não conta.
     #[test]
