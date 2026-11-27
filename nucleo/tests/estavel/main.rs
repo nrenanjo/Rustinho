@@ -227,6 +227,16 @@ fn executar_por_fora() {
     b.conn.execute_batch(&sql).unwrap();
 }
 
+/// Só nos roteiros de tela (PEND-30, 0.9.19): faz uma cópia de backup da loja de teste, como o backup automático, na
+/// pasta de backup dela.
+/// `RUSTINHO_LOJA_TESTE=/pasta cargo test ... -- --ignored fazer_backup_por_fora`
+#[test]
+#[ignore]
+fn fazer_backup_por_fora() {
+    let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE") else { return };
+    rustinho_nucleo::backup::fazer(&std::path::Path::new(&pasta).join("rustinho.db"), false).unwrap();
+}
+
 /// Só à mão: desativa um usuário da loja de teste por fora, como se a
 /// mudança chegasse de outro caixa (para ver a tela voltar à entrada, D-07).
 /// `RUSTINHO_LOJA_TESTE=/pasta RUSTINHO_DESATIVAR=Bia cargo test ... -- --ignored desativar_por_fora`

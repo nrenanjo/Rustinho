@@ -10,6 +10,29 @@ FocusScope {
     // Rustinho volta para …").
     readonly property string nomeNaNavegacao: "Boas-vindas"
     readonly property var janela: ApplicationWindow.window
+    // E7-7 (PEND-30 (a), decisão do proprietário de 26/11/2026): com o banco vazio e cópias da loja na pasta de backup
+    // deste computador (o Rustinho reinstalado), oferece restaurar antes de criar uma loja nova.
+    property var copias: []
+    Component.onCompleted: {
+        const r = Api.chamar("inicio_copias", {})
+        copias = r.ok && Array.isArray(r.dados) ? r.dados : []
+    }
+
+    function restaurarCopia() {
+        senhaCopia.erro = ""
+        const c = copias[0]
+        Api.chamarDemorado("inicio_restaurar", { arquivo: c.caminho, senha: senhaCopia.texto }, "Restaurando a loja…", r => {
+            if (r.ok) {
+                painelRestaurar.close()
+                janela.avisar("A loja foi restaurada da cópia de " + c.quando + ". Entre com o seu usuário.", "ok")
+                janela.atualizarEstado()
+                janela.trocarPara("TelaEntrar")
+                return
+            }
+            senhaCopia.erro = r.erro
+            senhaCopia.focarSempre()
+        })
+    }
 
     function comecar() {
         for (const c of [loja, caixa, nome, senha, senha2])
@@ -73,6 +96,25 @@ FocusScope {
                     Layout.leftMargin: -10
                     Layout.topMargin: 6
                     onClicked: tela.janela.trocarPara("TelaJuntar")
+                }
+            }
+
+            Faixa {
+                visible: tela.copias.length > 0
+                titulo: "Restaurar a loja"
+                color: Tema.verde
+                Layout.fillWidth: true
+                Layout.topMargin: 8
+                Nota {
+                    text: tela.copias.length === 0 ? ""
+                          : "Encontrei cópias da loja neste " + Tema.aparelho + ". A mais nova é de " + tela.copias[0].quando
+                            + ". Se o Rustinho foi reinstalado, restaure a loja a partir da cópia: ela volta como estava."
+                    font.pixelSize: 15
+                    Layout.fillWidth: true
+                }
+                Botao {
+                    text: "Restaurar a loja a partir da cópia"
+                    onClicked: painelRestaurar.open()
                 }
             }
 
@@ -147,4 +189,35 @@ FocusScope {
     }
 
     StackView.onActivated: loja.focarSempre()
+
+    // PEND-30: a senha de um gerente da loja da cópia (a cópia sai trancada com a chave da loja).
+    Painel {
+        id: painelRestaurar
+        contentItem: ColumnLayout {
+            spacing: 12
+            Titulo { text: "Restaurar a loja"; font.pixelSize: 30; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Nota {
+                text: tela.copias.length === 0 ? ""
+                      : "A loja volta como estava na cópia de " + tela.copias[0].quando
+                        + ". Digite a senha de um gerente da loja (a que ele usava quando a cópia foi feita)."
+                font.pixelSize: 15
+                Layout.fillWidth: true
+            }
+            Campo {
+                id: senhaCopia
+                rotulo: "Senha de um gerente"
+                senha: true
+                maximo: 256
+                Layout.fillWidth: true
+                onConfirmado: tela.restaurarCopia()
+            }
+            Botao {
+                text: "Restaurar"
+                tipo: "principal"
+                Layout.alignment: Qt.AlignRight
+                onClicked: tela.restaurarCopia()
+            }
+        }
+        onOpened: senhaCopia.focarSempre()
+    }
 }
