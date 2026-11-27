@@ -95,14 +95,31 @@ pub(super) fn gerar_lotes(conn: &Connection, caminho_db: &Path) -> Resultado<usi
     let acessos = acessos_da_loja(conn)?;
     let pasta = pasta_local_dos_lotes(conn, caminho_db)?;
     std::fs::create_dir_all(&pasta).map_err(|e| erro_pasta(&pasta, e))?;
+    // A3 da R1 da 008 (regra F01): o lote aberto nunca toca a pasta de destino (pen drive, pasta sincronizada); ele
+    // fica, por um instante, na pasta temporária da pasta privada, só do usuário. As sobras de uma queda saem aqui
+    // (as da pasta privada, com mais de uma hora; e o aberto que uma versão anterior tenha deixado na pasta dos lotes).
+    let privada = pasta_privada(Some(caminho_db));
+    apagar_sobras(&privada);
+    for e in std::fs::read_dir(&pasta).into_iter().flatten().flatten() {
+        let n = e.file_name().to_string_lossy().to_string();
+        if n.starts_with('.') && n.ends_with(".json") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+    let tmp = Temporaria::nova(&privada)?;
     let mut desde = partida(conn)?;
     let mut novos = 0;
     while let Some((lote, ate, tem_mais)) = montar_lote(conn, desde)? {
         if lote["alteracoes"].as_array().is_some_and(|a| !a.is_empty()) {
             let nome = nome_do_lote(desde + 1, ate);
-            let claro = pasta.join(format!(".{nome}.json"));
+            let claro = tmp.0.join(format!("{nome}.json"));
             let parcial = pasta.join(format!(".{nome}.parcial"));
-            std::fs::write(&claro, serde_json::to_vec(&lote)?).map_err(|e| erro_pasta(&pasta, e))?;
+            std::fs::write(&claro, serde_json::to_vec(&lote)?).map_err(|e| erro_pasta(&tmp.0, e))?;
+            #[cfg(test)]
+            if limites_de_teste::QUEDA_NO_LOTE.with(|c| c.get()) {
+                std::mem::forget(tmp);
+                return Err(Erro::validacao("queda simulada"));
+            }
             let r = (|| -> Resultado<()> {
                 let mut saida = std::fs::File::create(&parcial).map_err(|e| erro_pasta(&pasta, e))?;
                 embrulhar(&claro, &mut saida, Some(&publica), &acessos)?;
@@ -371,6 +388,69 @@ mod testes {
         assert!(!String::from_utf8_lossy(&bytes).contains("Bia"), "cifrado: o nome não aparece");
         // Nada novo: nenhum lote.
         assert_eq!(gerar_lotes(&b.conn, &caminho).unwrap(), 0);
+    }
+
+    /// A3 da R1 da 008 (regra F01): o lote aberto nunca é gravado na pasta de destino. Numa queda logo depois de
+    /// gravar o aberto, ele fica só na pasta temporária da pasta privada (só do usuário) e sai na volta seguinte; o
+    /// aberto que uma versão anterior tenha deixado na pasta dos lotes também sai.
+    #[test]
+    fn e7_2_lote_aberto_nunca_na_pasta_de_destino() {
+        let _trava = super::super::testes::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let (b, caminho, _nuvem) = loja_de_teste("cofre-aberto-fora");
+        let destino = caminho.parent().unwrap().join("destino");
+        std::fs::create_dir_all(&destino).unwrap();
+        config::gravar(&b.conn, "backup_pasta", &destino.display().to_string()).unwrap();
+        let privada = caminho.parent().unwrap().to_path_buf();
+        partida(&b.conn).unwrap();
+        crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", false).unwrap();
+        let pasta = pasta_local_dos_lotes(&b.conn, &caminho).unwrap();
+        assert!(pasta.starts_with(&destino), "a pasta dos lotes fica no destino: {}", pasta.display());
+        std::fs::create_dir_all(&pasta).unwrap();
+        let velho = pasta.join(".0000000000000001-0000000000000002.rbl.json");
+        std::fs::write(&velho, "{\"nome\":\"Velho\"}").unwrap();
+        // Queda logo depois de gravar o aberto.
+        super::super::limites_de_teste::QUEDA_NO_LOTE.with(|c| c.set(true));
+        let r = gerar_lotes(&b.conn, &caminho);
+        super::super::limites_de_teste::QUEDA_NO_LOTE.with(|c| c.set(false));
+        assert!(r.is_err());
+        assert!(!velho.exists(), "o aberto deixado por uma versão anterior saiu");
+        let mut abertos_no_destino = vec![];
+        let mut pilha = vec![destino.clone()];
+        while let Some(d) = pilha.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                if e.path().is_dir() {
+                    pilha.push(e.path());
+                } else if String::from_utf8_lossy(&std::fs::read(e.path()).unwrap()).contains("Bia") {
+                    abertos_no_destino.push(e.path());
+                }
+            }
+        }
+        assert!(abertos_no_destino.is_empty(), "nada aberto no destino: {abertos_no_destino:?}");
+        let sobras: Vec<PathBuf> = std::fs::read_dir(&privada)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".rustinho-tmp-"))
+            .map(|e| e.path())
+            .collect();
+        assert_eq!(sobras.len(), 1, "a sobra da queda fica na pasta privada");
+        let aberto = std::fs::read_dir(&sobras[0]).unwrap().flatten().next().unwrap().path();
+        assert!(String::from_utf8_lossy(&std::fs::read(&aberto).unwrap()).contains("Bia"), "é o lote aberto");
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&sobras[0]).unwrap().permissions().mode() & 0o077, 0, "só do usuário");
+        // Na volta seguinte (a sobra já velha), ela sai e o lote é gerado cifrado.
+        super::super::limites_de_teste::IDADE_DAS_SOBRAS.with(|c| c.set(Some(0)));
+        let r = gerar_lotes(&b.conn, &caminho);
+        super::super::limites_de_teste::IDADE_DAS_SOBRAS.with(|c| c.set(None));
+        assert_eq!(r.unwrap(), 1);
+        assert!(!sobras[0].exists(), "a sobra saiu");
+        assert!(
+            std::fs::read_dir(&privada)
+                .unwrap()
+                .flatten()
+                .all(|e| !e.file_name().to_string_lossy().starts_with(".rustinho-tmp-")),
+            "nenhuma temporária ficou"
+        );
+        let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
     }
 
     /// E7-3 (D3): só a conferência faz o cofre andar; um lote mandado e conferido sai da pasta local, e um envio cortado

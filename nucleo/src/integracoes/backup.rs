@@ -776,6 +776,8 @@ mod limites_de_teste {
         pub static BANCO: Cell<u64> = const { Cell::new(0) };
         /// F01: idade mínima (s) das sobras de uma queda que o backup apaga.
         pub static IDADE_DAS_SOBRAS: Cell<Option<u64>> = const { Cell::new(None) };
+        /// A3 da R1 da 008: o cofre "cai" logo depois de gravar o claro do lote (sem limpar nada).
+        pub static QUEDA_NO_LOTE: Cell<bool> = const { Cell::new(false) };
     }
 }
 
