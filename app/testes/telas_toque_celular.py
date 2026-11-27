@@ -62,6 +62,16 @@ def xdo(*args):
     subprocess.run(["xdotool", *args], env=dict(os.environ, DISPLAY=TELA), check=True)
 
 
+XVFB = None
+
+
+def estado_do_xvfb():
+    """T039: o estado do Xvfb quando a janela não aparece: vivo ou não, o soquete da tela e o fim do xvfb.log."""
+    vivo = "sem Xvfb" if XVFB is None else ("vivo" if XVFB.poll() is None else f"morto (código {XVFB.returncode})")
+    soquete = f"/tmp/.X11-unix/X{TELA.lstrip(':')}"
+    return f"Xvfb {vivo}; soquete {soquete} {'existe' if os.path.exists(soquete) else 'NÃO existe'}; veja xvfb.log"
+
+
 class Celular(tema.Rustinho):
     """O Rustinho com o desenho do celular, conferindo o ambiente antes de
     tocar nele (DISPLAY da tela virtual, sem Wayland, xcb)."""
@@ -100,7 +110,7 @@ class Celular(tema.Rustinho):
                 time.sleep(0.25)
                 return
             time.sleep(0.08)
-        raise RuntimeError(f"a janela do Rustinho não apareceu (veja {self.saida})")
+        raise RuntimeError(f"a janela do Rustinho não apareceu (veja {self.saida}; {estado_do_xvfb()})")
 
     def ponteiro_dentro(self):
         """Sem gerenciador de janelas, o teclado vai para a janela embaixo
@@ -494,7 +504,12 @@ def main():
     os.makedirs(fotos, exist_ok=True)
     modelo = tempfile.mkdtemp(prefix="rustinho-loja-toque-modelo-")
     lado = (max(1600, round(LARGURA_DP * DENSIDADE) + 200), max(1700, round(ALTURA_DP * DENSIDADE) + 100))
-    xvfb = subprocess.Popen(["Xvfb", TELA, "-screen", "0", f"{lado[0]}x{lado[1]}x24"], stderr=subprocess.DEVNULL)
+    # T039: o que o Xvfb diz vai para o xvfb.log, junto das fotos (antes ia para o nada, e o "could not connect to
+    # display" da CI 46062652064 ficou sem motivo).
+    xvfb_log = open(os.path.join(fotos, "xvfb.log"), "w")
+    xvfb = subprocess.Popen(["Xvfb", TELA, "-screen", "0", f"{lado[0]}x{lado[1]}x24"], stdout=xvfb_log, stderr=xvfb_log)
+    global XVFB
+    XVFB = xvfb
     time.sleep(1)
     res = tema.Resultado()
     inventario = []

@@ -261,7 +261,9 @@ Item {
             _logMov("acompanhar")
     }
 
-    // T039: a pintura da luz depende só do tamanho da área (e do tema); a posição vem do x/y do Canvas. Repintar a cada
+    // T039: a pintura da luz depende só do tamanho da área, do tema e de três constantes (Tema.raioCampo, folga e
+    // alcanceLuz); se alguma delas passar a variar, ela também tem de pedir repintura (R18 B-8). A posição vem do x/y do
+    // Canvas. Repintar a cada
     // mudança de lugar (a cada quadro da rolagem) custava de 0,35 s a 1 s por quadro no desenho por processador (a sombra
     // de 42 px), e a rolagem guiada virava uma parada seguida de um salto.
     property real _luzLargura: -1
