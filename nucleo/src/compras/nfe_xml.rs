@@ -329,14 +329,15 @@ fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
         return Err("Este XML é de um CT-e (frete), não de uma NF-e. Digite o valor do frete na compra.".into());
     }
     if descendente(raiz, "infMDFe").is_some() {
-        return Err("Este XML é de um MDF-e (manifesto de carga): não é de uma NF-e.".into());
+        return Err(
+            "Este XML é de um MDF-e (manifesto de carga): não é de uma NF-e. Escolha o XML da nota da mercadoria."
+                .into(),
+        );
     }
     let inf = descendente(raiz, "infNFe").ok_or_else(|| {
         let nome = raiz.tag_name().name();
         if nome.contains("resNFe") || nome.contains("procEvento") || nome.contains("evento") {
             "Este XML é um resumo ou um evento, não a nota completa. Baixe o XML completo da NF-e.".to_string()
-        } else if descendente(raiz, "infCte").is_some() {
-            "Este XML é de um CT-e (frete), não de uma NF-e. Digite o valor do frete na compra.".to_string()
         } else {
             "Este XML não é de uma NF-e.".to_string()
         }
@@ -781,11 +782,13 @@ mod testes {
             let e = ler(&texto).unwrap_err();
             assert!(e.contains("CT-e"), "{e}");
             let a = crate::nfe_assinatura::Ancoras::de_teste();
-            assert_ne!(ler_cadastro_verificada(&texto, a).err().unwrap(), TEXTO_VARIAS_NOTAS);
+            let v = ler_cadastro_verificada(&texto, a).err().unwrap();
+            assert!(v.contains("CT-e"), "{v}");
         }
         let mdfe = "<mdfeProc><MDFe><infMDFe Id=\"MDFe1\"><infDoc><infMunDescarga><infNFe><chNFe>1</chNFe></infNFe>\
                     <infNFe><chNFe>2</chNFe></infNFe></infMunDescarga></infDoc></infMDFe></MDFe></mdfeProc>";
-        assert_ne!(ler(mdfe).unwrap_err(), TEXTO_VARIAS_NOTAS);
+        let e = ler(mdfe).unwrap_err();
+        assert!(e.contains("MDF-e") && e.contains("não é de uma NF-e"), "{e}");
         let unica =
             "<nfeProc><NFe><!-- <infNFe Id=\"x\"> --><!--> <infNFe Id=\"z\"> --><infNFe Id=\"NFe1\" versao=\"4.00\"/>\
                      <infNFeSupl><qrCode><![CDATA[<infNFe Id=\"y\">]]></qrCode></infNFeSupl></NFe></nfeProc>";
