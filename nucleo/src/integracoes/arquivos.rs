@@ -308,8 +308,8 @@ fn ler_xml(texto: &str) -> Option<roxmltree::Document<'_>> {
 ///    ordem, e por último o primeiro elemento; comentários, CDATA, instruções e declarações são pulados na procura.
 ///    Para cada começo, corta antes dele (se o que vem antes não for só uma declaração bem formada e comentários) e
 ///    depois do último fechamento dele; o primeiro corte que abre é o documento.
-/// 4. **Mais de uma nota no arquivo** (mais de um `infNFe`: toda nota tem exatamente um, e um nome solto no lixo não
-///    tem nenhum): não se corta nada, para nunca ficar com uma nota só sem avisar (B-2 da revisão).
+/// 4. **Mais de uma nota no arquivo** (mais de um `infNFe` com atributos: toda nota tem exatamente um, com `Id`; o do
+///    CT-e e do MDF-e, só com a chave, e um nome solto no lixo não contam): não se corta nada, para nunca ficar com uma nota só sem avisar (B-2 da revisão).
 /// 5. Nada abriu: volta o texto como veio (e a tela explica em português; B-7 da revisão: nunca um texto vazio sem
 ///    motivo).
 ///
@@ -379,18 +379,22 @@ fn extrair_a_nota(texto: &str) -> Option<String> {
     if abertura.len() > 64 * 1024 || nota.namespaces().len() > 32 {
         return None;
     }
+    // B-6 da R4 e B-2 da R5: os espaços de nomes que a nota usa, pela árvore (os nomes dos elementos e dos atributos),
+    // e não pelo texto (um "a:" num texto livre não conta).
+    let usados: std::collections::HashSet<&str> = nota
+        .descendants()
+        .filter(|n| n.is_element())
+        .flat_map(|n| n.tag_name().namespace().into_iter().chain(n.attributes().filter_map(|a| a.namespace())))
+        .collect();
     let mut acrescimo = String::new();
     for ns in nota.namespaces().filter(|ns| ns.name() != Some("xml")) {
         let atributo = match ns.name() {
             Some(prefixo) => format!("xmlns:{prefixo}="),
             None => "xmlns=".to_string(),
         };
-        // B-6 da R4: só os espaços de nomes que a nota usa (o padrão, ou um prefixo que aparece nela); um prefixo só
-        // do embrulho entraria na canonicalização e derrubaria a assinatura de uma nota boa.
-        let usado = match ns.name() {
-            None => true,
-            Some(prefixo) => trecho.contains(&format!("<{prefixo}:")) || trecho.contains(&format!(" {prefixo}:")),
-        };
+        // Só os que a nota usa: um prefixo só do embrulho entraria na canonicalização e derrubaria a assinatura de uma
+        // nota boa.
+        let usado = usados.contains(ns.uri());
         if usado && !abertura.contains(&atributo) {
             acrescimo.push_str(&format!(" {atributo}\"{}\"", escapar_atributo(ns.uri())));
         }
@@ -424,7 +428,7 @@ struct Achados<'a> {
     notas: usize,
 }
 
-/// Quantas notas (`infNFe`) o texto tem, contadas até 2 (para dizer "mais de uma nota").
+/// Quantas notas (`infNFe` com atributos) o texto tem, contadas até 2 (para dizer "mais de uma nota").
 pub(crate) fn notas_no_texto(t: &str) -> usize {
     achar(t).notas
 }
@@ -937,6 +941,23 @@ mod testes {
         assert!(abre(&aninhado(64)));
         assert!(!abre(&aninhado(65)));
         assert!(!abre(&aninhado(200_000)));
+    }
+
+    /// B-1 da R5: a extração não leva uma nota com espaços de nomes demais (só num arquivo hostil), e leva a de uma nota
+    /// normal (com 3).
+    #[test]
+    fn xdcl_extracao_limita_os_espacos_de_nomes() {
+        let muitos: String = (0..40).map(|i| format!(" xmlns:p{i}=\"u{i}\"")).collect();
+        let hostil = format!("<pagina{muitos}><NFe><infNFe Id=\"a\"/></NFe></pagina>");
+        assert!(texto_do_xml(hostil.as_bytes()).starts_with("<pagina"), "não extrai");
+        let normal = "<pagina xmlns=\"n\" xmlns:a=\"x\" xmlns:b=\"y\"><NFe a:k=\"1\"><infNFe Id=\"a\"/></NFe></pagina>";
+        assert_eq!(
+            texto_do_xml(normal.as_bytes()),
+            "<NFe xmlns=\"n\" xmlns:a=\"x\" a:k=\"1\"><infNFe Id=\"a\"/></NFe>"
+        );
+        // B-2 da R5: um "b:" no texto livre não faz levar o prefixo b.
+        let texto_livre = "<pagina xmlns:b=\"y\"><NFe><infNFe Id=\"a\"><x>Entrega b: rua</x></infNFe></NFe></pagina>";
+        assert_eq!(texto_do_xml(texto_livre.as_bytes()), "<NFe><infNFe Id=\"a\"><x>Entrega b: rua</x></infNFe></NFe>");
     }
 
     /// B-4 e B-6 da R4: na extração de uma nota de um embrulho, o endereço do espaço de nomes é escrito com escape
