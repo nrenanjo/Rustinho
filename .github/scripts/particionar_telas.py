@@ -42,6 +42,7 @@ EXIGEM_REDE_EXCLUSIVA = {"telas_rvi02", "telas_dev2_protocolo4"}
 
 # Pesos estimados (em segundos, calibrados pelos tempos reais medidos no CachyOS + CI 44984217573) para balanceamento LPT.
 PESOS_SEGUNDOS = {
+    "telas_luz_guia_temas": 75,
     "telas_seta_esc__estatico_a6_cinza": 75,
     "telas_seta_esc__a6_amoled": 90,
     "telas_seta_esc__a6_roxo": 75,

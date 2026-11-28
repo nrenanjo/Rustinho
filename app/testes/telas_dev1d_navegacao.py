@@ -10,7 +10,8 @@ Cobre de ponta a ponta (em Xvfb com o binário real):
      persistida e respeito a `RUSTINHO_MOVIMENTO_REDUZIDO_SISTEMA=1`).
   3. P6 (`--medir-movimento`): rolagem suave com múltiplos passos (250–450 ms),
      destaque entrando somente após a chegada (`A6`), erro de alinhamento <= 2 px (`A5`),
-     recorte S-3 abaixo do cabeçalho (`A10`), e modo reduzido em 0 ms (`A9`).
+     recorte S-3 abaixo do cabeçalho (`A10`), e modo reduzido em 0 ms (`A9`);
+     T040: nenhum quadro da rolagem guiada passa de 250 ms (com a luz num Canvas, a rolagem parava e saltava).
   4. NCG-1 + NCG-2: validação progressiva campo a campo (3 pendências em TelaPeca),
      avanço automático após correção de cada campo, transição para
      "Requisito satisfeito — conclua a operação" SEM gravação automática no SQLite,
@@ -305,6 +306,13 @@ def main():
                and dist_total > 100 and monotonico
                and 150 <= dur_real <= 1200,
                f"passos={len(rolagens)} dur_real={dur_real}ms inicio={inicios[-1:]}")
+            # T040: a rolagem não para no meio. Com a luz num Canvas, cada quadro repintava a sombra no processador, e um
+            # quadro chegava a 400–800 ms aqui e a ~1,2 s na CI (T039); com os anéis, os quadros ficam em ~16–35 ms.
+            idx_ini = max((i for i, e in enumerate(evs) if e.get("fase") == "inicio"), default=-1)
+            tempos = [e.get("t", 0) for e in evs[idx_ini:] if e.get("fase") in ("inicio", "rolar", "fim")] if idx_ini >= 0 else []
+            maior_quadro = max((tempos[i] - tempos[i - 1] for i in range(1, len(tempos))), default=-1)
+            ok("P6 T040: nenhum quadro da rolagem guiada demora mais de 250 ms (a rolagem não para e salta)",
+               len(tempos) >= 4 and 0 <= maior_quadro <= 250, f"maior_quadro={maior_quadro}ms quadros={len(tempos)}")
             ok("P6 A6: destaque só entra depois que a rolagem conclui",
                idx_aguarda >= 0 and idx_ativo > idx_aguarda
                and evs[idx_aguarda].get("opacidade", 1) == 0,
