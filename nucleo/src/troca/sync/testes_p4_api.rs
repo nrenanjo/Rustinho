@@ -74,8 +74,15 @@ fn p4_api_caixa_novo_entra_pelo_convite_digitado() {
         assert!(!lista.to_string().contains(&texto), "a lista não mostra o segredo do convite");
         assert_eq!(lista[0]["gerente"], "Ana", "o nome de quem gerou (o identificador fica no banco)");
 
-        let r =
-            ok(&mut sb, "p4_juntar_com_convite", json!({ "convite": texto, "enderecos": format!("127.0.0.1:{pt_a}") }));
+        // R1 M4 (T002 da 009): um nome digitado errado ao lado do endereço certo não impede a entrada.
+        let _t = super::cliente::resolvedor_de_teste::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        *super::cliente::resolvedor_de_teste::QUAL.lock().unwrap() = Some(|_| None);
+        let r = ok(
+            &mut sb,
+            "p4_juntar_com_convite",
+            json!({ "convite": texto, "enderecos": format!("nome-errado.loja.local, 127.0.0.1:{pt_a}") }),
+        );
+        *super::cliente::resolvedor_de_teste::QUAL.lock().unwrap() = None;
         assert_eq!(r["p4"]["aprovado"], true, "o caixa novo ficou aprovado: {r}");
         assert_eq!(r["p4"]["temRaiz"], true);
         assert_eq!(r["ligado"], true, "a troca ligou sem a senha da rede");
@@ -121,6 +128,9 @@ fn p4_api_convite_e_entrada_recusados_fora_das_regras() {
         // Endereço digitado errado: o campo certo.
         let cn = temp("api-regras-novo");
         let mut sn = caixa_novo(&cn);
+        // R1 B10: sem depender do DNS de verdade (um DNS que responde a tudo faria o nome "existir").
+        let _t = super::cliente::resolvedor_de_teste::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        *super::cliente::resolvedor_de_teste::QUAL.lock().unwrap() = Some(|_| None);
         let r = chamar(
             &mut sn,
             "p4_juntar_com_convite",
@@ -129,6 +139,9 @@ fn p4_api_convite_e_entrada_recusados_fora_das_regras() {
         assert_eq!(r["campo"], "enderecos", "{r}");
         // E6-1 (T002 da 009): um nome que não está na rede também vai ao campo, com o motivo.
         assert!(r["erro"].as_str().unwrap_or("").contains("caixa-da-frente"), "{r}");
+        // R1 M5: o texto novo (o de antes dizia só "Endereço inválido").
+        assert!(r["erro"].as_str().unwrap_or("").contains("não foi encontrado na rede"), "{r}");
+        *super::cliente::resolvedor_de_teste::QUAL.lock().unwrap() = None;
         // E o endereço com a forma errada (o sublinhado não vale em nome), também.
         let r = chamar(
             &mut sn,

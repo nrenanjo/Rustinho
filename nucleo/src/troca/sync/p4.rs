@@ -750,11 +750,16 @@ fn entrar_com_convite(
         alvos.push(a);
     }
     // E6-1 (T002 da 009): um endereço DIGITADO que não dá certo (um nome que não está na rede, ou que não respondeu a
-    // tempo) é dito no próprio campo, em vez de ser pulado em silêncio.
+    // tempo) é dito no próprio campo, em vez de ser pulado em silêncio. Mas só se nenhum outro caminho (o QR, os
+    // anúncios) funcionar: um nome errado não impede a entrada pelo endereço certo (R1 M4).
+    let mut erro_do_digitado: Option<Erro> = None;
     for e in enderecos.iter().filter(|e| !e.trim().is_empty()) {
-        let a = endereco_completo(e.trim()).map_err(|erro| Erro::campo("enderecos", erro.to_string()))?;
-        if !alvos.contains(&a) {
-            alvos.push(a);
+        match endereco_completo(e.trim()) {
+            Ok(a) if !alvos.contains(&a) => alvos.push(a),
+            Ok(_) => {}
+            Err(erro) => {
+                erro_do_digitado.get_or_insert_with(|| Erro::campo("enderecos", erro.to_string()));
+            }
         }
     }
     for a in ouvidos(caminho, &loja_esperada) {
@@ -766,7 +771,7 @@ fn entrar_com_convite(
         alvos = procurar_pelos_anuncios(&loja_esperada, PRAZO_DA_PROCURA);
     }
     if alvos.is_empty() {
-        return Err(Erro::validacao(TEXTO_SEM_ENDERECO));
+        return Err(erro_do_digitado.unwrap_or_else(|| Erro::validacao(TEXTO_SEM_ENDERECO)));
     }
     let mut ultimo: Option<Erro> = None;
     for alvo in alvos {
@@ -819,7 +824,7 @@ fn entrar_com_convite(
         tx.commit()?;
         return Ok(EntradaPeloConvite { loja: entrada.loja_id, nome });
     }
-    Err(ultimo.unwrap_or_else(|| Erro::validacao(TEXTO_SEM_ENDERECO)))
+    Err(erro_do_digitado.or(ultimo).unwrap_or_else(|| Erro::validacao(TEXTO_SEM_ENDERECO)))
 }
 
 /// T012: sem endereço nenhum, o caixa escuta os anúncios `RSA4` por até `prazo`

@@ -496,8 +496,11 @@ impl Motor {
                         ultima_raiz = Instant::now();
                     }
                     {
+                        // R1 M2 (T002 da 009): os nomes são resolvidos antes de pegar a trava (até 2 s no total, ouvindo
+                        // o pedido de parada); dentro da trava fica só o SQLite, como antes.
+                        let digitados = digitados_completos(&a, &parar);
                         let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
-                        let _ = caminhos::digitar(&conn, &digitados_completos(&a), agora_ms());
+                        let _ = caminhos::digitar(&conn, &digitados, agora_ms());
                     }
                     // A lista de interfaces é lida a cada ciclo: um cabo
                     // desconectado deixa de ser caminho já no ciclo seguinte.

@@ -54,6 +54,9 @@ env:
   # carregada: vai no grupo serial, como os outros de rede.
   TESTES_DE_REDE: "rede_local:: sync:: testes_supervisao:: caminhos::"
   PULAR_REDE: "--skip rede_local:: --skip sync:: --skip testes_supervisao:: --skip caminhos::"
+  # R1 A1 da T003 (009): o laboratório da tun9 (unshare) é exigido; sem o namespace, o teste reprova em vez de passar
+  # calado.
+  RUSTINHO_EXIGIR_LAB_REDE: "1"
 
 jobs:
   # L0: formatação, clippy e a forma do portão.

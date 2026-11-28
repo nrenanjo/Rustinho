@@ -2803,15 +2803,11 @@ impl Servico {
             "senhaFraca": sync::senha_fora_da_politica(conn)?,
             "enderecos": a.enderecos.join(", "),
             // E6-1 (T002 da 009): o IP de cada nome digitado, resolvido no último ciclo (ou o erro).
-            "nomesResolvidos": sync::nomes_resolvidos()
-                .into_iter()
-                .filter(|(n, _)| a.enderecos.iter().any(|e| e.split(':').next() == Some(n.as_str())))
-                .map(|(n, r)| json!({ "nome": n, "resultado": r }))
-                .collect::<Vec<_>>(),
+            "nomesResolvidos": nomes_para_a_tela(&a.enderecos, sync::nomes_resolvidos(), ativa),
             "interfaces": a.interfaces.join(", "),
             "interfacesIgnoradas": sync::interfaces_ignoradas(&a.interfaces),
             // E6-1 (T003 da 009): as VPNs de camada 3 deste computador, só para informar.
-            "vpns": crate::rede_local::vpns(&crate::rede_local::listar().unwrap_or_default())
+            "vpns": crate::rede_local::vpns(&crate::rede_local::listar_para_vpns().unwrap_or_default())
                 .into_iter()
                 .map(|(nome, ip)| json!({ "nome": nome, "ip": ip.to_string() }))
                 .collect::<Vec<_>>(),
@@ -3680,6 +3676,44 @@ struct Impressao {
 }
 
 /// Endereço deste computador na rede local (para digitar nos outros caixas).
+/// E6-1 (T002 da 009), R1 B4 e M5: os nomes digitados e o que cada um deu no último ciclo, para a tela. Só os nomes que
+/// ainda estão digitados; com a troca parada, nada (nada é resolvido, e a tela não mostra resultado velho).
+fn nomes_para_a_tela(enderecos: &[String], resolvidos: Vec<(String, String)>, ativa: bool) -> Vec<Value> {
+    if !ativa {
+        return Vec::new();
+    }
+    resolvidos
+        .into_iter()
+        .filter(|(n, _)| enderecos.iter().any(|e| e.split(':').next() == Some(n.as_str())))
+        .map(|(n, r)| json!({ "nome": n, "resultado": r }))
+        .collect()
+}
+
+#[cfg(test)]
+mod testes_nomes_para_a_tela {
+    use super::*;
+
+    #[test]
+    fn t002_r1_a_tela_so_mostra_os_digitados_e_so_com_a_troca_ligada() {
+        let enderecos = vec!["caixa2.loja.local".to_string(), "caixa3:47820".to_string()];
+        let resolvidos = vec![
+            ("caixa2.loja.local".to_string(), "10.0.0.2".to_string()),
+            ("caixa3".to_string(), "não respondeu a tempo".to_string()),
+            ("velho.loja.local".to_string(), "10.0.0.9".to_string()),
+        ];
+        let tela = nomes_para_a_tela(&enderecos, resolvidos.clone(), true);
+        assert_eq!(
+            tela,
+            vec![
+                json!({ "nome": "caixa2.loja.local", "resultado": "10.0.0.2" }),
+                json!({ "nome": "caixa3", "resultado": "não respondeu a tempo" }),
+            ],
+            "o nome que saiu da lista não aparece; o com porta, sim"
+        );
+        assert!(nomes_para_a_tela(&enderecos, resolvidos, false).is_empty(), "troca parada: nada de resultado velho");
+    }
+}
+
 fn endereco_local() -> String {
     // Não envia nada: só pergunta ao sistema por qual endereço sairia.
     std::net::UdpSocket::bind("0.0.0.0:0")
