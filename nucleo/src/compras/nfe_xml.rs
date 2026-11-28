@@ -744,7 +744,7 @@ mod testes {
         let i = certo.find("<nfeProc").unwrap();
         let fim_tag = i + certo[i..].find('>').unwrap();
         assert!(certo[i..fim_tag].contains(ns), "a nota de teste declara o espaço de nomes no nfeProc");
-        let sem_ns = format!("{}{}", &certo[i..fim_tag].replacen(ns, "", 1), &certo[fim_tag..]);
+        let sem_ns = format!("{}{}", certo[i..fim_tag].replacen(ns, "", 1), &certo[fim_tag..]);
         // B-6 da R4: o embrulho também declara um prefixo que a nota não usa; ele não pode entrar na nota.
         let embrulho = format!(
             "<pagina{ns} xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\"><titulo>Nota baixada</titulo>{sem_ns}</pagina>"
@@ -787,8 +787,17 @@ mod testes {
         }
         let mdfe = "<mdfeProc><MDFe><infMDFe Id=\"MDFe1\"><infDoc><infMunDescarga><infNFe><chNFe>1</chNFe></infNFe>\
                     <infNFe><chNFe>2</chNFe></infNFe></infMunDescarga></infDoc></infMDFe></MDFe></mdfeProc>";
-        let e = ler(mdfe).unwrap_err();
-        assert!(e.contains("MDF-e") && e.contains("não é de uma NF-e"), "{e}");
+        // B-3 da R6: o MDF-e também pelos caminhos da tela (a nota verificada, de cadastro e de compra) e com lixo na
+        // frente.
+        for texto in [mdfe.to_string(), crate::integracoes::arquivos::texto_do_xml(format!("lixo {mdfe}").as_bytes())] {
+            let e = ler(&texto).unwrap_err();
+            assert!(e.contains("MDF-e") && e.contains("não é de uma NF-e"), "{e}");
+            let a = crate::nfe_assinatura::Ancoras::de_teste();
+            let v = ler_cadastro_verificada(&texto, a).err().unwrap();
+            assert!(v.contains("MDF-e") && v.contains("não é de uma NF-e"), "{v}");
+            let v = ler_verificada(&texto, a).err().unwrap();
+            assert!(v.contains("MDF-e") && v.contains("não é de uma NF-e"), "{v}");
+        }
         let unica =
             "<nfeProc><NFe><!-- <infNFe Id=\"x\"> --><!--> <infNFe Id=\"z\"> --><infNFe Id=\"NFe1\" versao=\"4.00\"/>\
                      <infNFeSupl><qrCode><![CDATA[<infNFe Id=\"y\">]]></qrCode></infNFeSupl></NFe></nfeProc>";
@@ -805,8 +814,7 @@ mod testes {
         }
         assert_eq!(e, TEXTO_SEM_NOTA);
         let r = crate::nfe_assinatura::verificar_para_cadastro("<<<", crate::nfe_assinatura::Ancoras::de_teste())
-            .err()
-            .expect("recusa");
+            .expect_err("recusa");
         assert_eq!(r.to_string(), "O arquivo não tem uma nota fiscal que dê para ler.");
         // Pelo caminho da tela (a nota verificada, de cadastro e de compra), a mesma frase, com o que fazer.
         for texto in ["<<<", "isto não é xml"] {

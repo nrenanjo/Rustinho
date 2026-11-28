@@ -361,7 +361,8 @@ fn ler_tudo(conn: &Connection, arquivos: &[String], compras: Option<&GanchoCompr
             Ok(n) => n.nota,
             Err(e) => {
                 lido.ignorados += 1;
-                if e.contains("evento") || e.contains("CT-e") {
+                // B-2 da R6 do BUG-20261128-XDCL: o MDF-e também (como o CT-e, não é a nota da mercadoria).
+                if e.contains("evento") || e.contains("CT-e") || e.contains("MDF-e") {
                     lido.eventos_e_cte += 1;
                 } else if lido.avisos.len() < 5 {
                     lido.avisos.push(format!("{nome}: {e}"));
@@ -421,13 +422,13 @@ fn ler_tudo(conn: &Connection, arquivos: &[String], compras: Option<&GanchoCompr
     if lido.eventos_e_cte > 0 {
         // T104 (N11 da 4ª conferência): o resumo de NF-e (resNFe) também cai aqui.
         lido.avisos.push(if lido.eventos_e_cte == 1 {
-            "1 arquivo era um evento, um CT-e ou um resumo de NF-e (não é a nota completa) e ficou de fora; de um \
-             resumo, baixe o XML completo da NF-e."
+            "1 arquivo era um evento, um CT-e, um MDF-e ou um resumo de NF-e (não é a nota completa) e ficou de fora; \
+             de um resumo, baixe o XML completo da NF-e."
                 .to_string()
         } else {
             format!(
-                "{} arquivos eram eventos, CT-e ou resumos de NF-e (não são a nota completa) e ficaram de fora; dos \
-                 resumos, baixe o XML completo da NF-e.",
+                "{} arquivos eram eventos, CT-e, MDF-e ou resumos de NF-e (não são a nota completa) e ficaram de \
+                 fora; dos resumos, baixe o XML completo da NF-e.",
                 lido.eventos_e_cte
             )
         });
@@ -3633,6 +3634,33 @@ mod testes {
         let p = previa(c, &[pasta.display().to_string()]).unwrap();
         assert!(!p.avisos.iter().any(|a| a.contains("sem o motivo listado")), "{:?}", p.avisos);
         assert!(p.avisos.iter().any(|a| a.contains("evento, um CT-e")), "o evento não foi dito: {:?}", p.avisos);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// B-2 da R6 do BUG-20261128-XDCL: numa pasta, o MDF-e (manifesto de carga) entra na linha dos eventos e CT-e, como
+    /// o CT-e; não vira um aviso dele mesmo com "Escolha o XML da nota", que não faz sentido quando a pasta inteira foi
+    /// escolhida de uma vez.
+    #[test]
+    fn previa_conta_o_mdfe_com_os_eventos_e_cte() {
+        let b = Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+        let pasta = std::env::temp_dir().join(format!("rustinho-importar-r6b2-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        std::fs::write(pasta.join("venda.xml"), NOTA_LOJA).unwrap();
+        std::fs::write(
+            pasta.join("manifesto.xml"),
+            "<mdfeProc><MDFe><infMDFe Id=\"MDFe1\"><infDoc><infNFe><chNFe>1</chNFe></infNFe></infDoc></infMDFe></MDFe>\
+             </mdfeProc>",
+        )
+        .unwrap();
+        let p = previa(c, &[pasta.display().to_string()]).unwrap();
+        assert!(!p.avisos.iter().any(|a| a.contains("Escolha o XML")), "{:?}", p.avisos);
+        assert!(
+            p.avisos.iter().any(|a| a.starts_with("1 arquivo era") && a.contains("MDF-e")),
+            "o MDF-e não foi dito na linha dos eventos: {:?}",
+            p.avisos
+        );
         let _ = std::fs::remove_dir_all(&pasta);
     }
 
