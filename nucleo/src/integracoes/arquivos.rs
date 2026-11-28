@@ -227,15 +227,255 @@ const CP1252: [char; 32] = [
 /// declaração passa a dizer UTF-8 com qualquer aspa e qualquer nome (antes,
 /// só `encoding="ISO-8859-1"` com aspas duplas era trocado).
 pub fn texto_do_xml(bytes: &[u8]) -> String {
+    // BUG-20261128-XDCL (diretriz do dono, 28/11): o Rustinho lê a nota apesar do que vier em volta dela.
+    // - UTF-16 (o "Unicode" do Bloco de Notas do Windows), com ou sem a marca;
+    // - UTF-8 válido;
+    // - UTF-8 com lixo inválido em volta (M-2 da revisão): a codificação é decidida pela parte da nota, depois do corte,
+    //   e não pelo arquivo inteiro (um byte estragado no lixo não pode estragar os acentos da nota);
+    // - senão, ISO-8859-1 / Windows-1252.
+    // Depois, `so_a_nota` tira o que estiver em volta da nota (só quando o arquivo não abre como está).
+    let preparar = |t: String| declarar_utf8(so_a_nota(declarar_utf8(t)));
+    if let Some(t) = utf16(bytes) {
+        return preparar(t);
+    }
     let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
-    let texto = match std::str::from_utf8(bytes) {
-        Ok(t) => t.to_string(),
-        Err(_) => bytes
-            .iter()
-            .map(|&b| if (0x80..0xA0).contains(&b) { CP1252[(b - 0x80) as usize] } else { b as char })
-            .collect(),
+    match std::str::from_utf8(bytes) {
+        Ok(t) => preparar(t.to_string()),
+        Err(_) => {
+            let cortado = preparar(String::from_utf8_lossy(bytes).into_owned());
+            if !cortado.contains('\u{FFFD}') && cortado.starts_with('<') {
+                cortado
+            } else {
+                preparar(
+                    bytes
+                        .iter()
+                        .map(|&b| if (0x80..0xA0).contains(&b) { CP1252[(b - 0x80) as usize] } else { b as char })
+                        .collect(),
+                )
+            }
+        }
+    }
+}
+
+/// O texto em UTF-16, com a marca (FF FE ou FE FF) ou, sem ela, reconhecido pelos bytes nulos dos dois primeiros
+/// caracteres (3C 00 3F 00 ou 00 3C 00 3F). `None`: não é UTF-16. Um byte sobrando no fim é ignorado; um substituto
+/// solto vira U+FFFD.
+fn utf16(bytes: &[u8]) -> Option<String> {
+    let (corpo, le) = match bytes {
+        [0xFF, 0xFE, r @ ..] => (r, true),
+        [0xFE, 0xFF, r @ ..] => (r, false),
+        [a, 0, b, 0, ..] if *a != 0 && *b != 0 => (bytes, true),
+        [0, a, 0, b, ..] if *a != 0 && *b != 0 => (bytes, false),
+        _ => return None,
     };
-    declarar_utf8(texto)
+    let unidades =
+        corpo
+            .chunks_exact(2)
+            .map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) });
+    Some(char::decode_utf16(unidades).map(|r| r.unwrap_or('\u{FFFD}')).collect())
+}
+
+/// Os elementos que começam um documento fiscal que o Rustinho lê (a nota, a nota processada e o que o importador
+/// sabe explicar: CT-e, resumo e evento).
+const RAIZES_FISCAIS: [&str; 9] =
+    ["nfeProc", "NFe", "procNFe", "cteProc", "CTe", "procEventoNFe", "resNFe", "resEvento", "evento"];
+
+/// Quantos lugares de começo o corte tenta, no máximo (cada tentativa lê o texto uma vez).
+const TENTATIVAS: usize = 16;
+
+/// O texto já abre como XML? (Sem DTD e com limite de nós, como o verificador da assinatura.)
+fn abre(texto: &str) -> bool {
+    ler_xml(texto).is_some()
+}
+
+/// Lê o texto como XML, com as mesmas proteções do verificador da assinatura: sem DTD, com limite de nós e, **antes**,
+/// a profundidade (o leitor é recursivo, e um arquivo hostil profundo demais derrubaria o programa: achado pelo teste
+/// do arquivo hostil).
+fn ler_xml(texto: &str) -> Option<roxmltree::Document<'_>> {
+    use crate::nfe_assinatura::{profundidade_excessiva, PROFUNDIDADE_MAXIMA};
+    if profundidade_excessiva(texto, PROFUNDIDADE_MAXIMA) {
+        return None;
+    }
+    let opcoes = roxmltree::ParsingOptions { allow_dtd: false, nodes_limit: 1_000_000, ..Default::default() };
+    roxmltree::Document::parse_with_options(texto, opcoes).ok()
+}
+
+/// BUG-20261128-XDCL (diretriz do dono, 28/11: o Rustinho lê o XML "independente de cabeçalho" e contorna os erros
+/// irrelevantes, como o sistema antigo da loja).
+/// 1. Tira espaços, bytes nulos e marcas de BOM (repetidas ou já viradas texto, `ï»¿`) do começo e do fim.
+/// 2. **Se o que sobra já abre como XML, é ele** (um arquivo certo nunca é cortado; B-1 da revisão).
+/// 3. Senão, procura o documento: os começos de elementos fiscais conhecido (`RAIZES_FISCAIS`, com ou sem prefixo), na
+///    ordem, e por último o primeiro elemento; comentários, CDATA, instruções e declarações são pulados na procura.
+///    Para cada começo, corta antes dele (se o que vem antes não for só uma declaração bem formada e comentários) e
+///    depois do último fechamento dele; o primeiro corte que abre é o documento.
+/// 4. **Mais de uma nota no arquivo** (mais de um `infNFe`: toda nota tem exatamente um, e um nome solto no lixo não
+///    tem nenhum): não se corta nada, para nunca ficar com uma nota só sem avisar (B-2 da revisão).
+/// 5. Nada abriu: volta o texto como veio (e a tela explica em português; B-7 da revisão: nunca um texto vazio sem
+///    motivo).
+///
+/// Nada disso muda a nota: o que está fora do elemento raiz não faz parte da parte assinada (a assinatura cobre o
+/// `infNFe`). O tempo é linear no tamanho do arquivo (no máximo `TENTATIVAS` leituras; M-1 da revisão).
+fn so_a_nota(texto: String) -> String {
+    let sujo = |c: char| c.is_whitespace() || c == '\0' || c == '\u{feff}';
+    let mut inicio = texto.trim_start_matches(sujo);
+    while let Some(r) = inicio.strip_prefix("ï»¿") {
+        inicio = r.trim_start_matches(sujo);
+    }
+    let inicio = inicio.trim_end_matches(sujo);
+    let aparado = |t: &str| if t.len() == texto.len() { None } else { Some(t.to_string()) };
+    if abre(inicio) {
+        return extrair_a_nota(inicio).or_else(|| aparado(inicio)).unwrap_or(texto);
+    }
+    let achados = achar(inicio);
+    if achados.notas > 1 {
+        return texto;
+    }
+    let candidatos: Vec<(usize, &str)> =
+        achados.fiscais.iter().copied().chain(achados.primeiro).take(TENTATIVAS).collect();
+    for (pos, nome) in candidatos {
+        let mut fim = inicio.len();
+        let fecho = format!("</{nome}");
+        if let Some(k) = inicio.rfind(&fecho).filter(|&k| k > pos) {
+            let depois = &inicio[k + fecho.len()..];
+            let espacos = depois.len() - depois.trim_start().len();
+            if depois.trim_start().starts_with('>') {
+                fim = k + fecho.len() + espacos + 1;
+            }
+        } else if let Some(f) = inicio[pos..].find('>') {
+            // Sem fechamento: a raiz que se fecha sozinha (`<NFe/>`) termina no `/>` dela.
+            if inicio[pos..pos + f].ends_with('/') {
+                fim = pos + f + 1;
+            }
+        }
+        let comeco = if prologo_limpo(&inicio[..pos]) { 0 } else { pos };
+        let corte = &inicio[comeco..fim];
+        if abre(corte) {
+            return extrair_a_nota(corte).unwrap_or_else(|| corte.to_string());
+        }
+    }
+    texto
+}
+
+/// O texto abre, mas a raiz não é um documento fiscal e há **uma** nota dentro (uma página com a nota, um lote
+/// `enviNFe` com uma nota só): fica só ela. As declarações de espaço de nomes que ela herdava do embrulho são repetidas
+/// no começo dela, para a leitura e a conferência da assinatura serem as mesmas. Mais de uma nota, ou nenhuma: `None`.
+fn extrair_a_nota(texto: &str) -> Option<String> {
+    let doc = ler_xml(texto)?;
+    let fiscal = |n: &roxmltree::Node| n.is_element() && RAIZES_FISCAIS.contains(&n.tag_name().name());
+    let raiz = doc.root_element();
+    if fiscal(&raiz) {
+        return None;
+    }
+    if raiz.descendants().filter(|n| n.is_element() && n.tag_name().name() == "infNFe").count() > 1 {
+        return None;
+    }
+    let nota = raiz.descendants().find(fiscal)?;
+    let trecho = &texto[nota.range()];
+    // O nome do elemento como está escrito (com o prefixo) e o fim dele no trecho.
+    let fim_nome = trecho[1..].find(|c: char| c.is_whitespace() || matches!(c, '>' | '/'))? + 1;
+    let mut acrescimo = String::new();
+    for ns in nota.namespaces().filter(|ns| ns.name() != Some("xml")) {
+        let atributo = match ns.name() {
+            Some(prefixo) => format!("xmlns:{prefixo}="),
+            None => "xmlns=".to_string(),
+        };
+        let abertura = &trecho[..trecho.find('>')?];
+        if !abertura.contains(&atributo) {
+            acrescimo.push_str(&format!(" {atributo}\"{}\"", escapar_atributo(ns.uri())));
+        }
+    }
+    let extraido = format!("{}{}{}", &trecho[..fim_nome], acrescimo, &trecho[fim_nome..]);
+    abre(&extraido).then_some(extraido)
+}
+
+/// O valor de um atributo escrito de volta no XML (B-6 da revisão): `&`, `<`, `"` e os espaços especiais com escape.
+fn escapar_atributo(v: &str) -> String {
+    let mut s = String::with_capacity(v.len());
+    for c in v.chars() {
+        match c {
+            '&' => s.push_str("&amp;"),
+            '<' => s.push_str("&lt;"),
+            '"' => s.push_str("&quot;"),
+            '\t' => s.push_str("&#9;"),
+            '\n' => s.push_str("&#10;"),
+            '\r' => s.push_str("&#13;"),
+            _ => s.push(c),
+        }
+    }
+    s
+}
+
+/// O que a procura achou, com a memória limitada (B-1 da revisão): o primeiro elemento, até `TENTATIVAS` começos de
+/// elementos fiscais, e quantas notas (`infNFe`), contadas até 2.
+struct Achados<'a> {
+    primeiro: Option<(usize, &'a str)>,
+    fiscais: Vec<(usize, &'a str)>,
+    notas: usize,
+}
+
+/// Quantas notas (`infNFe`) o texto tem, contadas até 2 (para dizer "mais de uma nota").
+pub(crate) fn notas_no_texto(t: &str) -> usize {
+    achar(t).notas
+}
+
+/// Os começos de elemento, em ordem, pulando comentários, CDATA, instruções de processamento e declarações (`<!…>`).
+/// Linear (M-1): cada nome termina em espaço, `>`, `/` ou no próximo `<`, e a procura pula o nome inteiro. Para assim que
+/// já tem o que precisa (o primeiro, `TENTATIVAS` fiscais e duas notas).
+fn achar(t: &str) -> Achados<'_> {
+    let mut a = Achados { primeiro: None, fiscais: Vec::new(), notas: 0 };
+    let mut i = 0;
+    while let Some(d) = t[i..].find('<') {
+        let p = i + d;
+        let resto = &t[p + 1..];
+        let pular = |fim: &str| resto.find(fim).map(|f| p + 1 + f + fim.len()).unwrap_or(t.len());
+        i = if resto.starts_with("!--") {
+            pular("-->")
+        } else if resto.starts_with("![CDATA[") {
+            pular("]]>")
+        } else if resto.starts_with('?') {
+            pular("?>")
+        } else if resto.starts_with('!') {
+            pular(">")
+        } else if resto.starts_with(|c: char| c.is_alphabetic() || c == '_') {
+            let n = resto.find(|c: char| c.is_whitespace() || matches!(c, '>' | '/' | '<')).unwrap_or(resto.len());
+            let nome = &resto[..n];
+            let local = nome.rsplit(':').next().unwrap_or(nome);
+            a.primeiro.get_or_insert((p, nome));
+            if local == "infNFe" {
+                a.notas = (a.notas + 1).min(2);
+            }
+            if RAIZES_FISCAIS.contains(&local) && a.fiscais.len() < TENTATIVAS {
+                a.fiscais.push((p, nome));
+            }
+            if a.notas >= 2 && a.fiscais.len() >= TENTATIVAS {
+                break;
+            }
+            p + 1 + n
+        } else {
+            p + 1
+        };
+        if i >= t.len() {
+            break;
+        }
+    }
+    a
+}
+
+/// O que vem antes do documento é só uma declaração XML bem formada, espaços e comentários (o que um arquivo certo tem).
+fn prologo_limpo(antes: &str) -> bool {
+    let mut r = antes.trim();
+    if let Some(x) = r.strip_prefix("<?xml") {
+        let Some(f) = x.find("?>") else { return false };
+        if x[..f].contains(['<', '>']) {
+            return false;
+        }
+        r = x[f + 2..].trim_start();
+    }
+    while let Some(x) = r.strip_prefix("<!--") {
+        let Some(f) = x.find("-->") else { return false };
+        r = x[f + 3..].trim_start();
+    }
+    r.is_empty()
 }
 
 /// O texto já está em UTF-8: a declaração `<?xml … encoding="…"?>` passa a
@@ -547,6 +787,134 @@ mod testes {
         // O que já era UTF-8 fica igual.
         let utf8 = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><x>São “ok”</x>";
         assert_eq!(texto_do_xml(utf8.as_bytes()), utf8);
+    }
+
+    /// BUG-20261128-XDCL (diretriz do dono, 28/11): o Rustinho lê o XML da nota independente do que vier em volta dela.
+    /// Um fornecedor (sistema emissor `verProc 1.4.1`) grava `??xml version="1.0"?>` no lugar de `<?xml …?>`; outros
+    /// arquivos trazem texto solto, marcas de BOM repetidas ou já viradas texto, bytes nulos, lixo depois do fim, ou vêm
+    /// em UTF-16. Fica só a nota; o que está fora dela não é assinado.
+    #[test]
+    fn xdcl_le_a_nota_apesar_do_que_vem_em_volta() {
+        // A declaração estragada, de vários jeitos.
+        assert_eq!(texto_do_xml(b"??xml version=\"1.0\"?><NFe><x/></NFe>"), "<NFe><x/></NFe>");
+        assert_eq!(texto_do_xml(b"?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<NFe/>"), "<NFe/>");
+        assert_eq!(texto_do_xml(b"?????xml version=\"1.0\"?><NFe/>"), "<NFe/>");
+        assert_eq!(texto_do_xml(b"??XML VERSION=\"1.0\"??<NFe/>"), "<NFe/>");
+        assert_eq!(texto_do_xml(b"?<?xml version=\"1.0\"?><NFe/>"), "<NFe/>");
+        // Texto solto, cabeçalho de outro formato, comentário estragado, BOM repetido ou virado texto, bytes nulos.
+        assert_eq!(
+            texto_do_xml(b"lixo qualquer\r\n<nfeProc versao=\"4.00\"><NFe/></nfeProc>"),
+            "<nfeProc versao=\"4.00\"><NFe/></nfeProc>"
+        );
+        assert_eq!(
+            texto_do_xml(b"<html><body><pre><nfeProc><NFe/></nfeProc></pre></body></html>"),
+            "<nfeProc><NFe/></nfeProc>"
+        );
+        assert_eq!(texto_do_xml(&[[0xEF, 0xBB, 0xBF, 0xEF, 0xBB, 0xBF].as_slice(), b"<NFe/>"].concat()), "<NFe/>");
+        assert_eq!(texto_do_xml("ï»¿<?xml version=\"1.0\"?><NFe/>".as_bytes()), "<?xml version=\"1.0\"?><NFe/>");
+        assert_eq!(texto_do_xml(b"\0\0\0<NFe/>\0\0"), "<NFe/>");
+        // Lixo depois do fim da nota.
+        assert_eq!(
+            texto_do_xml(b"<nfeProc><NFe/></nfeProc>\r\nfim do arquivo <assinatura/>"),
+            "<nfeProc><NFe/></nfeProc>"
+        );
+        // Com prefixo de espaço de nomes.
+        assert_eq!(
+            texto_do_xml(b"??xml?><ns2:nfeProc xmlns:ns2=\"x\"><ns2:NFe/></ns2:nfeProc>xx"),
+            "<ns2:nfeProc xmlns:ns2=\"x\"><ns2:NFe/></ns2:nfeProc>"
+        );
+        // Latin-1 com a declaração estragada: a codificação ainda é lida certa.
+        let t = texto_do_xml(b"??xml version=\"1.0\" encoding=\"ISO-8859-1\"?><x>S\xC3O</x>");
+        assert_eq!(t, "<x>SÃO</x>");
+        assert!(roxmltree::Document::parse(&t).is_ok());
+        // UTF-16 (o "Unicode" do Bloco de Notas), com e sem a marca, nas duas ordens.
+        let u = "<?xml version=\"1.0\" encoding=\"UTF-16\"?><NFe>Peça</NFe>";
+        let le: Vec<u8> = u.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+        let be: Vec<u8> = u.encode_utf16().flat_map(|c| c.to_be_bytes()).collect();
+        let esperado = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><NFe>Peça</NFe>";
+        assert_eq!(texto_do_xml(&[[0xFF, 0xFE].as_slice(), &le].concat()), esperado);
+        assert_eq!(texto_do_xml(&[[0xFE, 0xFF].as_slice(), &be].concat()), esperado);
+        assert_eq!(texto_do_xml(&le), esperado);
+        assert_eq!(texto_do_xml(&be), esperado);
+        // O que já estava certo fica igual, inclusive a declaração e os comentários antes da nota.
+        for certo in [
+            "<?xml version=\"1.0\"?><NFe/>",
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- gerado por x -->\n<nfeProc><NFe/></nfeProc>",
+            "<NFe><x>a &lt; b</x></NFe>",
+        ] {
+            assert_eq!(texto_do_xml(certo.as_bytes()), certo);
+        }
+        // M-2 da revisão: um byte estragado no lixo não estraga os acentos da nota (UTF-8).
+        assert_eq!(
+            texto_do_xml(b"\x80\x81 lixo\r\n<nfeProc><x>Pe\xC3\xA7a</x></nfeProc>\xFF"),
+            "<nfeProc><x>Peça</x></nfeProc>"
+        );
+        // B-1: o que já abre como XML não é cortado, mesmo com nomes fiscais em comentários; o lixo com nome fiscal
+        // antes da nota não engana.
+        for certo in
+            ["<!-- gerado por <NFe> -->\n<nfeProc><NFe/></nfeProc>", "<nfeProc><NFe/></nfeProc><!-- </nfeProc> -->"]
+        {
+            assert_eq!(texto_do_xml(certo.as_bytes()), certo);
+        }
+        assert_eq!(texto_do_xml(b"Segue a <NFe> em anexo\n<NFe xmlns=\"x\"><a/></NFe>"), "<NFe xmlns=\"x\"><a/></NFe>");
+        // Um embrulho que abre como XML com UMA nota dentro (um lote enviNFe de uma nota): fica a nota, com o espaço de
+        // nomes que ela herdava. Com duas notas, nada é cortado (B-2).
+        assert_eq!(
+            texto_do_xml(b"<enviNFe xmlns=\"http://www.portalfiscal.inf.br/nfe\" versao=\"4.00\"><idLote>1</idLote><NFe><infNFe Id=\"a\"/></NFe></enviNFe>"),
+            "<NFe xmlns=\"http://www.portalfiscal.inf.br/nfe\"><infNFe Id=\"a\"/></NFe>"
+        );
+        let duas = "<enviNFe><NFe><infNFe Id=\"a\"/></NFe><NFe><infNFe Id=\"b\"/></NFe></enviNFe>";
+        assert_eq!(texto_do_xml(duas.as_bytes()), duas);
+        let duas_com_lixo = format!("lixo {duas}");
+        assert_eq!(texto_do_xml(duas_com_lixo.as_bytes()), duas_com_lixo);
+        // O evento também passa pelo mesmo caminho.
+        assert_eq!(
+            texto_do_xml(b"lixo<procEventoNFe><evento/></procEventoNFe>"),
+            "<procEventoNFe><evento/></procEventoNFe>"
+        );
+        // Um DOCTYPE com entidade não vira uma nota que abre (o leitor continua recusando entidades).
+        assert!(!abre(&texto_do_xml(b"<!DOCTYPE x [<!ENTITY b \"bomba\">]><nfeProc>&b;</nfeProc>")));
+        // Lixo com emoji e acentos dos dois lados; UTF-16 de tamanho ímpar e com substituto solto: sem pânico.
+        assert_eq!(texto_do_xml("😀 lixo ção <NFe/> 😀 fim".as_bytes()), "<NFe/>");
+        let mut impar: Vec<u8> = "<NFe/>".encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+        impar.push(0x41);
+        assert_eq!(texto_do_xml(&impar), "<NFe/>");
+        let solto = [0xFF, 0xFE, b'<', 0, b'a', 0, 0x00, 0xD8, b'/', 0, b'>', 0];
+        assert!(texto_do_xml(&solto).contains('\u{FFFD}'));
+        // Sem nenhum elemento, não há o que salvar: fica como está (e a tela explica em português).
+        for nada in ["", "sem sinal", "????"] {
+            assert_eq!(texto_do_xml(nada.as_bytes()), nada);
+        }
+    }
+
+    /// M-1 e B-3 da revisão: arquivos hostis (milhões de `<` sem fechamento, milhares de começos de nota, comentários
+    /// abertos, bytes inválidos) não travam a leitura: o tempo é linear. Cada um roda numa linha à parte com prazo, para
+    /// o teste reprovar em vez de travar a bateria se o tempo voltar a crescer.
+    #[test]
+    fn xdcl_arquivo_hostil_nao_trava() {
+        let casos: Vec<Vec<u8>> = vec![
+            "<a".repeat(1_000_000).into_bytes(),
+            "<NFe>".repeat(200_000).into_bytes(),
+            "<!--".repeat(500_000).into_bytes(),
+            [b"\x80\x81".as_slice(), &b"<infNFe x=\"\xC3\">".repeat(100_000)].concat(),
+        ];
+        for (i, caso) in casos.into_iter().enumerate() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(texto_do_xml(&caso).len());
+            });
+            assert!(
+                rx.recv_timeout(std::time::Duration::from_secs(30)).is_ok(),
+                "o caso hostil {i} não terminou em 30 s"
+            );
+        }
+    }
+
+    /// B-7 da revisão: um arquivo só com espaços ou bytes nulos não vira um texto vazio (que quer dizer "não deu para
+    /// ler" sem o motivo).
+    #[test]
+    fn xdcl_arquivo_so_com_espacos_fica_como_veio() {
+        assert_eq!(texto_do_xml(b"   \r\n\0\0 "), "   \r\n\0\0 ");
     }
 
     #[test]

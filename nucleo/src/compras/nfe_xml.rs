@@ -253,6 +253,9 @@ pub fn ler_cadastro_verificada(xml: &str, ancoras: &Ancoras) -> Result<NotaVerif
 }
 
 fn verificada(xml: &str, ancoras: &Ancoras, aceita_nfce: bool) -> Result<NotaVerificada, String> {
+    if crate::integracoes::arquivos::notas_no_texto(xml) > 1 {
+        return Err(TEXTO_VARIAS_NOTAS.into());
+    }
     let resultado = if aceita_nfce {
         nfe_assinatura::verificar_para_cadastro(xml, ancoras)
     } else {
@@ -274,14 +277,51 @@ fn verificada(xml: &str, ancoras: &Ancoras, aceita_nfce: bool) -> Result<NotaVer
     Ok(NotaVerificada { nota, prova: v.prova })
 }
 
+/// BUG-20261128-XMSG (B-3 da revisão): a frase única de "não há nota que dê para ler", com o que fazer.
+pub const TEXTO_SEM_NOTA: &str =
+    "O arquivo não tem uma nota fiscal que dê para ler: ele está incompleto ou não é o XML \
+de uma nota. Peça o arquivo de novo ao fornecedor ou baixe-o no portal da SEFAZ.";
+
+/// B-9 da revisão: o arquivo tem mais de uma nota (um lote): a frase diz isso, e o que fazer.
+pub const TEXTO_VARIAS_NOTAS: &str =
+    "O arquivo tem mais de uma nota fiscal. Separe uma nota por arquivo e escolha de novo.";
+
+const ANOTACOES_MAXIMAS: usize = 20;
+
+/// O que anotar na recusa número `n` (contando do 0) desta execução: o motivo, um aviso de que as próximas não são
+/// anotadas, ou nada (B-4 da revisão: no máximo `ANOTACOES_MAXIMAS` linhas, para não empurrar o resto do registro).
+fn anotacao(n: usize, motivo: &str) -> Option<String> {
+    match n {
+        n if n < ANOTACOES_MAXIMAS => Some(format!("XML de nota recusado pelo leitor: {motivo}")),
+        n if n == ANOTACOES_MAXIMAS => Some("XML de nota recusado: as próximas recusas não são anotadas".to_string()),
+        _ => None,
+    }
+}
+
+fn anotar_recusa(motivo: &str) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static ANOTADAS: AtomicUsize = AtomicUsize::new(0);
+    if let Some(linha) = anotacao(ANOTADAS.fetch_add(1, Ordering::Relaxed), motivo) {
+        crate::registro::anotar(&linha);
+    }
+}
+
 fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
+    if crate::integracoes::arquivos::notas_no_texto(xml) > 1 {
+        return Err(TEXTO_VARIAS_NOTAS.into());
+    }
     // Alguns arquivos vêm com BOM ou espaços antes da declaração.
     let xml = xml.trim_start_matches('\u{feff}').trim_start();
     // O leitor é recursivo: arquivo profundo demais derrubaria o programa.
     if nfe_assinatura::profundidade_excessiva(xml, nfe_assinatura::PROFUNDIDADE_MAXIMA) {
         return Err("O arquivo não é um XML de NF-e válido (aninhamento profundo demais).".into());
     }
-    let doc = Document::parse(xml).map_err(|e| format!("O arquivo não é um XML válido ({e})."))?;
+    // BUG-20261128-XMSG: o motivo técnico do leitor (em inglês) vai só para o registro do programa, no máximo
+    // `ANOTACOES_MAXIMAS` vezes por execução (uma pasta com milhares de arquivos ruins não empurra o resto para fora).
+    let doc = Document::parse(xml).map_err(|e| {
+        anotar_recusa(&e.to_string());
+        TEXTO_SEM_NOTA.to_string()
+    })?;
     let raiz = doc.root_element();
     let inf = descendente(raiz, "infNFe").ok_or_else(|| {
         let nome = raiz.tag_name().name();
@@ -664,9 +704,79 @@ mod testes {
         assert_eq!(r.unwrap().nota.incoerencia, "a chave de acesso não tem 44 posições válidas");
     }
 
+    /// BUG-20261128-XDCL: a nota com a declaração XML estragada (`??xml … ?>`, como a de um fornecedor em 28/11/2026)
+    /// abre pelo caminho de verdade (o texto do arquivo e a nota de cadastro verificada), e a assinatura confere, porque
+    /// a declaração fica fora da parte assinada.
+    #[test]
+    fn xdcl_nota_com_declaracao_estragada_abre_e_a_assinatura_confere() {
+        let certo = alfa("alfa_ok.xml");
+        assert!(certo.starts_with("<?xml"));
+        let utf16: Vec<u8> =
+            [0xFF, 0xFE].into_iter().chain(certo.encode_utf16().flat_map(|c| c.to_le_bytes())).collect();
+        for (caso, bytes) in [
+            ("a declaração estragada", format!("?{}", &certo[1..]).into_bytes()),
+            ("lixo antes e depois", format!("arquivo exportado em 28/11\r\n{certo}\r\n-- fim --\0\0").into_bytes()),
+            ("UTF-16", utf16),
+        ] {
+            let texto = crate::integracoes::arquivos::texto_do_xml(&bytes);
+            let v = ler_cadastro_verificada(&texto, crate::nfe_assinatura::Ancoras::de_teste())
+                .unwrap_or_else(|e| panic!("{caso}: a nota não abriu: {e}"));
+            assert_eq!(v.nota.chave, "35261012ABC34501DE35550010000123451000000015", "{caso}");
+            assert_eq!(v.nota.incoerencia, "", "{caso}");
+        }
+    }
+
+    /// B-5 da revisão: a nota assinada dentro de um embrulho que abre como XML e que leva a declaração do espaço de
+    /// nomes no lugar dela: a nota é extraída com a declaração repetida, e a assinatura confere igual.
+    #[test]
+    fn xdcl_nota_extraida_de_um_embrulho_confere_a_assinatura() {
+        let certo = alfa("alfa_ok.xml");
+        let ns = " xmlns=\"http://www.portalfiscal.inf.br/nfe\"";
+        let i = certo.find("<nfeProc").unwrap();
+        let fim_tag = i + certo[i..].find('>').unwrap();
+        assert!(certo[i..fim_tag].contains(ns), "a nota de teste declara o espaço de nomes no nfeProc");
+        let sem_ns = format!("{}{}", &certo[i..fim_tag].replacen(ns, "", 1), &certo[fim_tag..]);
+        let embrulho = format!("<pagina{ns}><titulo>Nota baixada</titulo>{sem_ns}</pagina>");
+        let texto = crate::integracoes::arquivos::texto_do_xml(embrulho.as_bytes());
+        assert!(texto.starts_with("<nfeProc"), "{}", &texto[..60]);
+        let v = ler_cadastro_verificada(&texto, crate::nfe_assinatura::Ancoras::de_teste()).expect("a nota abre");
+        assert_eq!(v.nota.chave, "35261012ABC34501DE35550010000123451000000015");
+        assert_eq!(v.nota.incoerencia, "");
+    }
+
+    /// B-9 e B-4 da revisão: mais de uma nota no arquivo tem a frase própria; o registro anota no máximo 20 recusas.
+    #[test]
+    fn xdcl_varias_notas_e_o_limite_do_registro() {
+        let lote = "<enviNFe><NFe><infNFe Id=\"a\"/></NFe><NFe><infNFe Id=\"b\"/></NFe></enviNFe>";
+        let a = crate::nfe_assinatura::Ancoras::de_teste();
+        assert_eq!(ler(lote).unwrap_err(), TEXTO_VARIAS_NOTAS);
+        assert_eq!(ler_cadastro_verificada(lote, a).err().unwrap(), TEXTO_VARIAS_NOTAS);
+        let texto = crate::integracoes::arquivos::texto_do_xml(format!("lixo {lote}").as_bytes());
+        assert_eq!(ler_verificada(&texto, a).err().unwrap(), TEXTO_VARIAS_NOTAS);
+        assert!(anotacao(0, "x").unwrap().contains("x"));
+        assert!(anotacao(ANOTACOES_MAXIMAS - 1, "x").is_some());
+        assert!(anotacao(ANOTACOES_MAXIMAS, "x").unwrap().contains("não são anotadas"));
+        assert_eq!(anotacao(ANOTACOES_MAXIMAS + 1, "x"), None);
+    }
+
     #[test]
     fn recusa_o_que_nao_e_nfe() {
-        assert!(ler("isto não é xml").is_err());
+        // BUG-20261128-XMSG: a recusa fala português, sem o texto técnico do leitor de XML (em inglês).
+        let e = ler("isto não é xml").unwrap_err();
+        for ingles in ["token", "unknown", "expected", "unexpected", "at 1:"] {
+            assert!(!e.contains(ingles), "{e}");
+        }
+        assert_eq!(e, TEXTO_SEM_NOTA);
+        let r = crate::nfe_assinatura::verificar_para_cadastro("<<<", crate::nfe_assinatura::Ancoras::de_teste())
+            .err()
+            .expect("recusa");
+        assert_eq!(r.to_string(), "O arquivo não tem uma nota fiscal que dê para ler.");
+        // Pelo caminho da tela (a nota verificada, de cadastro e de compra), a mesma frase, com o que fazer.
+        for texto in ["<<<", "isto não é xml"] {
+            let a = crate::nfe_assinatura::Ancoras::de_teste();
+            assert_eq!(ler_cadastro_verificada(texto, a).err().unwrap(), TEXTO_SEM_NOTA);
+            assert_eq!(ler_verificada(texto, a).err().unwrap(), TEXTO_SEM_NOTA);
+        }
         assert!(ler("<cteProc><CTe><infCte/></CTe></cteProc>").unwrap_err().contains("CT-e"));
         assert!(ler("<resNFe><chNFe>1</chNFe></resNFe>").unwrap_err().contains("resumo"));
     }
