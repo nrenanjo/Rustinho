@@ -261,7 +261,6 @@ Item {
             _logMov("acompanhar")
     }
 
-    onAreaChanged: luz.requestPaint()
     onWidthChanged: if (alvo) medir()
     onHeightChanged: if (alvo) medir()
     onTopoChanged: if (alvo) medir()
@@ -382,70 +381,72 @@ Item {
         readonly property real lw: guia.area.width
         readonly property real lh: guia.area.height
 
-        Canvas {
+        // T040: a luz é feita de anéis (Rectangle), e não de um Canvas. O Canvas com sombra de 42 px era repintado no
+        // processador a cada mudança de lugar da área (a parada de ~1 s na rolagem guiada, T039); os anéis só mudam de
+        // lugar, sem pintura nova. Cada anel tem a opacidade da sombra naquela distância (desfoque 42 ≈ 21 px de
+        // espalhamento); o anel de dentro (a folga) leva a sombra e o tom claro, e o interior do campo fica limpo.
+        Item {
             id: luz
-            x: camadaDestaque.lx - guia.alcanceLuz
-            y: camadaDestaque.ly - guia.alcanceLuz
-            width: camadaDestaque.lw + 2 * guia.alcanceLuz
-            height: camadaDestaque.lh + 2 * guia.alcanceLuz
+            objectName: "luzGuia"
+            x: camadaDestaque.lx
+            y: camadaDestaque.ly
+            width: camadaDestaque.lw
+            height: camadaDestaque.lh
+            visible: width > 0 && height > 0
 
-            onPaint: {
-                const ctx = getContext("2d")
-                ctx.clearRect(0, 0, width, height)
-                if (camadaDestaque.lw <= 0 || camadaDestaque.lh <= 0)
-                    return
+            readonly property real raio: Math.min(Tema.raioCampo + guia.folga, Math.min(width, height) / 2)
+            readonly property color corSombra: Tema.roxo ? Qt.rgba(1, 214 / 255, 246 / 255, 0.92)
+                                               : Tema.escuro ? Qt.rgba(232 / 255, 194 / 255, 126 / 255, 0.62)
+                                               : Qt.rgba(1, 248 / 255, 230 / 255, 0.96)
+            readonly property color corTom: Tema.roxo ? Qt.rgba(1, 230 / 255, 250 / 255, 0.14)
+                                            : Tema.escuro ? Qt.rgba(232 / 255, 194 / 255, 126 / 255, 0.06)
+                                            : Qt.rgba(1, 249 / 255, 237 / 255, 0.16)
+            readonly property real passo: 3
+            readonly property int aneis: Math.ceil(guia.alcanceLuz / passo)
 
-                const x = guia.alcanceLuz
-                const y = guia.alcanceLuz
-                const w = camadaDestaque.lw
-                const h = camadaDestaque.lh
-                const r = Math.min(Tema.raioCampo + guia.folga, Math.min(w, h) / 2)
+            // A força da sombra a uma distância d da borda (d < 0 é dentro): metade de erfc(d / (σ√2)), σ = 21.
+            function forca(d) {
+                const z = d / (21 * Math.SQRT2)
+                const t = 1 / (1 + 0.3275911 * Math.abs(z))
+                const e = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027
+                          + t * 1.061405429)))) * Math.exp(-z * z)
+                return 0.5 * (z >= 0 ? e : 2 - e)
+            }
+            function comAlfa(c, a) { return Qt.rgba(c.r, c.g, c.b, c.a * a) }
 
-                function tracarRetanguloArredondado(rx, ry, rw, rh, rad) {
-                    ctx.beginPath()
-                    ctx.moveTo(rx + rad, ry)
-                    ctx.lineTo(rx + rw - rad, ry)
-                    ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + rad)
-                    ctx.lineTo(rx + rw, ry + rh - rad)
-                    ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - rad, ry + rh)
-                    ctx.lineTo(rx + rad, ry + rh)
-                    ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - rad)
-                    ctx.lineTo(rx, ry + rad)
-                    ctx.quadraticCurveTo(rx, ry, rx + rad, ry)
-                    ctx.closePath()
+            Repeater {
+                model: luz.aneis
+                Rectangle {
+                    required property int index
+                    readonly property real fora: (index + 1) * luz.passo
+                    x: -fora
+                    y: -fora
+                    width: luz.width + 2 * fora
+                    height: luz.height + 2 * fora
+                    radius: luz.raio + fora
+                    color: "transparent"
+                    border.width: luz.passo
+                    border.color: luz.comAlfa(luz.corSombra, luz.forca(fora - luz.passo / 2))
+                    antialiasing: false
                 }
-
-                // 1) Aura luminosa difusa ao redor do retângulo destacado.
-                ctx.save()
-                ctx.shadowColor = Tema.roxo ? "rgba(255, 214, 246, 0.92)"
-                                : Tema.escuro ? "rgba(232, 194, 126, 0.62)" : "rgba(255, 248, 230, 0.96)"
-                ctx.shadowBlur = 42
-                ctx.shadowOffsetX = 0
-                ctx.shadowOffsetY = 0
-                ctx.fillStyle = Tema.roxo ? "rgba(255, 230, 250, 0.14)"
-                              : Tema.escuro ? "rgba(232, 194, 126, 0.06)" : "rgba(255, 249, 237, 0.16)"
-                tracarRetanguloArredondado(x, y, w, h, r)
-                ctx.fill()
-                ctx.restore()
-
-                // 2) Mantém o interior do campo 100% nítido (preserva contraste e bordas de estado/erro).
-                const iw = w - 2 * guia.folga
-                const ih = h - 2 * guia.folga
-                if (iw > 2 && ih > 2) {
-                    const ir = Math.min(Tema.raioCampo, Math.min(iw, ih) / 2)
-                    ctx.save()
-                    ctx.globalCompositeOperation = "destination-out"
-                    ctx.fillStyle = "rgba(0, 0, 0, 1)"
-                    tracarRetanguloArredondado(x + guia.folga, y + guia.folga, iw, ih, ir)
-                    ctx.fill()
-                    ctx.restore()
+            }
+            Rectangle {   // a folga: a sombra por baixo e o tom claro por cima
+                anchors.fill: parent
+                radius: luz.raio
+                color: "transparent"
+                border.width: Math.min(guia.folga, Math.min(luz.width, luz.height) / 2)
+                border.color: luz.comAlfa(luz.corSombra, luz.forca(-guia.folga / 2))
+                antialiasing: false
+                Rectangle {
+                    anchors.fill: parent
+                    radius: parent.radius
+                    color: "transparent"
+                    border.width: parent.border.width
+                    border.color: luz.corTom
+                    antialiasing: false
                 }
             }
         }
-    }
-    Connections {
-        target: Tema
-        function onTemaChanged() { luz.requestPaint() }
     }
 
     // ---- Orientação: a notificação do Início (padrão fixo P-NOTIF), no alto ----
