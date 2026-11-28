@@ -402,9 +402,10 @@ Item {
                                             : Tema.escuro ? Qt.rgba(232 / 255, 194 / 255, 126 / 255, 0.06)
                                             : Qt.rgba(1, 249 / 255, 237 / 255, 0.16)
             readonly property real passo: 3
-            // A força dos anéis, medida contra a luz do Canvas antigo nas fotos (B-1 da telas_c8_revisao): com 1,0 a
-            // borda ficava ~3 vezes mais clara que antes; com 0,36, igual (+7 a 8 de claridade na borda, ~1 a 30 px).
-            readonly property real forcaLuz: 0.36
+            // A força dos anéis (M-1 da R19): no Canvas, a sombra nascia da forma preenchida pelo tom, então a luz era
+            // a do tom vezes a da sombra; a força é o alfa do tom de cada tema (0,16 no claro, 0,06 no escuro, 0,14 no
+            // roxo). Conferido nos três temas contra fotos do Canvas antigo (telas_luz_guia_temas).
+            readonly property real forcaLuz: corTom.a
             readonly property int aneis: Math.ceil(guia.alcanceLuz / passo)
 
             // A força da sombra a uma distância d da borda (d < 0 é dentro): metade de erfc(d / (σ√2)), σ = 21.

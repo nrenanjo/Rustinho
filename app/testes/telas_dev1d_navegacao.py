@@ -10,7 +10,8 @@ Cobre de ponta a ponta (em Xvfb com o binário real):
      persistida e respeito a `RUSTINHO_MOVIMENTO_REDUZIDO_SISTEMA=1`).
   3. P6 (`--medir-movimento`): rolagem suave com múltiplos passos (250–450 ms),
      destaque entrando somente após a chegada (`A6`), erro de alinhamento <= 2 px (`A5`),
-     recorte S-3 abaixo do cabeçalho (`A10`), e modo reduzido em 0 ms (`A9`).
+     recorte S-3 abaixo do cabeçalho (`A10`), e modo reduzido em 0 ms (`A9`);
+     T040: nenhum quadro da rolagem guiada passa de 250 ms (com a luz num Canvas, a rolagem parava e saltava).
   4. NCG-1 + NCG-2: validação progressiva campo a campo (3 pendências em TelaPeca),
      avanço automático após correção de cada campo, transição para
      "Requisito satisfeito — conclua a operação" SEM gravação automática no SQLite,
