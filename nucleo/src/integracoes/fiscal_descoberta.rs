@@ -127,6 +127,11 @@ pub fn identificador_csc_do_qrcode(qr: &str) -> String {
 }
 
 fn ler_nota(xml: &str) -> Result<Nota, String> {
+    // B-2 da R4 do BUG-20261128-XDCL: a mesma proteção do verificador (o leitor é recursivo, e um arquivo hostil
+    // profundo demais derrubaria o programa).
+    if crate::nfe_assinatura::profundidade_excessiva(xml, crate::nfe_assinatura::PROFUNDIDADE_MAXIMA) {
+        return Err("não é um XML válido".to_string());
+    }
     let doc = roxmltree::Document::parse(xml).map_err(|_| "não é um XML válido".to_string())?;
     let raiz = doc.root_element();
     let inf = descendente(raiz, "infNFe").ok_or("não é uma NF-e nem NFC-e")?;
@@ -394,6 +399,14 @@ mod comandos {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// B-2 da R4 do BUG-20261128-XDCL: um arquivo hostil profundo demais é recusado na descoberta fiscal, e não derruba
+    /// o programa (o leitor é recursivo).
+    #[test]
+    fn xdcl_arquivo_profundo_demais_nao_derruba() {
+        let profundo = format!("{}{}", "<NFe>".repeat(200_000), "</NFe>".repeat(200_000));
+        assert!(ler_nota(&profundo).is_err());
+    }
 
     const EXEMPLO: &str = include_str!("../../tests/nfe_exemplo.xml");
 
