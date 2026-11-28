@@ -217,7 +217,7 @@ FocusScope {
                     Campo {
                         id: endereco
                         rotulo: "Endereço do caixa da loja (só se não achar sozinho)"
-                        dica: "Aparece junto do convite. Ex.: 192.168.0.12"
+                        dica: "Aparece junto do convite. Ex.: 192.168.0.12 ou caixa2.loja.local"
                         maximo: 300
                         Layout.fillWidth: true
                         onConfirmado: tela.entrar()

@@ -51,6 +51,9 @@ pub struct Interface {
     pub mascara: Ipv4Addr,
     /// Ligada e com cabo/sinal. Desativada não recebe anúncio nem serve de caminho.
     pub ativa: bool,
+    /// R2 M2 (T003 da 009): o sistema diz `Up` (no Linux, macOS e Android, `IFF_RUNNING`). O `ativa` aceita também o
+    /// estado desconhecido (um cabo sem a informação); para mostrar uma VPN na tela, só vale a ligada de verdade.
+    pub com_sinal: bool,
     pub tipo: Tipo,
 }
 
@@ -62,9 +65,32 @@ impl Interface {
             ip: Ipv4Addr::from(ip),
             mascara: Ipv4Addr::from(u32::MAX.checked_shl(32 - prefixo as u32).unwrap_or(0)),
             ativa: true,
+            com_sinal: true,
             tipo,
         }
     }
+}
+
+/// E6-1 (T003 da 009): uma VPN de camada 3 (WireGuard, OpenVPN `tun`, Tailscale), pelo nome. Só para mostrar na tela
+/// ("VPN wg0: 10.8.0.2"): ela continua sem anunciar nada (é virtual). As de camada 2 (`tap`, ZeroTier) ficam de fora.
+pub fn vpn_camada3(nome: &str) -> bool {
+    let n = nome.to_lowercase();
+    // As de camada 2 primeiro, pela palavra (e não por qualquer pedaço do nome, R1 B1): o `tap` do OpenVPN ("tap0",
+    // "OpenVPN TAP-Windows6").
+    let palavras: Vec<&str> = n.split(|c: char| !c.is_ascii_alphanumeric()).filter(|p| !p.is_empty()).collect();
+    if palavras.iter().any(|p| p.starts_with("tap")) {
+        return false;
+    }
+    // `tunl0` é o túnel IPIP do próprio Linux, não uma VPN (R1 B1).
+    let tun = n.starts_with("tun") && !n.starts_with("tunl");
+    tun || ["wg", "utun", "nordlynx"].iter().any(|p| n.starts_with(p))
+        || ["tailscale", "wireguard", "openvpn"].iter().any(|t| n.contains(t))
+}
+
+/// As VPNs de camada 3 desta lista, **ligadas** (R1 M1), com o IP de cada uma (para a tela). A lista vem do
+/// [`listar_para_vpns`], que guarda as interfaces ponto a ponto (o caso das VPNs).
+pub fn vpns(lista: &[Interface]) -> Vec<(String, Ipv4Addr)> {
+    lista.iter().filter(|i| i.com_sinal && vpn_camada3(&i.nome)).map(|i| (i.nome.clone(), i.ip)).collect()
 }
 
 /// Classifica uma interface pelo nome que o sistema dá a ela (Linux, Android
@@ -119,9 +145,20 @@ pub fn classificar(nome: &str) -> Tipo {
 /// As interfaces IPv4 deste computador (sem a de loopback). Erro se o sistema
 /// não souber listar: quem chama volta ao comportamento antigo.
 pub fn listar() -> std::io::Result<Vec<Interface>> {
+    listar_com(false)
+}
+
+/// R1 A1 da T003: as interfaces para a lista de VPNs. Como o [`listar`], mas **com** as ponto a ponto: em Linux, macOS e
+/// Android o sistema marca `wg0`, `tun0`, `tailscale0` e `utun` como ponto a ponto (`IFF_POINTOPOINT`), e o [`listar`]
+/// as tira (de propósito, para o anúncio). Sem esta, a tela nunca mostraria as VPNs de verdade.
+pub fn listar_para_vpns() -> std::io::Result<Vec<Interface>> {
+    listar_com(true)
+}
+
+fn listar_com(com_ponto_a_ponto: bool) -> std::io::Result<Vec<Interface>> {
     let mut lista = Vec::new();
     for i in if_addrs::get_if_addrs()? {
-        if !aceita_na_lista(i.is_loopback(), i.is_p2p()) {
+        if !aceita_na_lista(i.is_loopback(), i.is_p2p() && !com_ponto_a_ponto) {
             continue;
         }
         let if_addrs::IfAddr::V4(v4) = &i.addr else { continue };
@@ -129,7 +166,15 @@ pub fn listar() -> std::io::Result<Vec<Interface>> {
             i.oper_status,
             if_addrs::IfOperStatus::Up | if_addrs::IfOperStatus::Unknown | if_addrs::IfOperStatus::Dormant
         ) && !v4.ip.is_unspecified();
-        lista.push(Interface { tipo: tipo_no_sistema(&i.name), nome: i.name, ip: v4.ip, mascara: v4.netmask, ativa });
+        let com_sinal = ativa && matches!(i.oper_status, if_addrs::IfOperStatus::Up);
+        lista.push(Interface {
+            tipo: tipo_no_sistema(&i.name),
+            nome: i.name,
+            ip: v4.ip,
+            mascara: v4.netmask,
+            ativa,
+            com_sinal,
+        });
     }
     Ok(lista)
 }
@@ -1033,5 +1078,113 @@ mod testes {
         assert!(erros_novos(&mut ja, erros.clone()).is_empty(), "repetido: não registra de novo");
         assert!(erros_novos(&mut ja, vec![]).is_empty());
         assert_eq!(erros_novos(&mut ja, erros).len(), 1, "voltou a dar erro depois de ter funcionado: registra");
+    }
+    /// E6-1 (T003 da 009): as VPNs de camada 3 aparecem com o IP; as de camada 2 e o resto, não.
+    #[test]
+    fn t003_vpns_de_camada_3_com_o_ip() {
+        // R1 B1: o `tap` só conta como palavra ("wg-laptop" é WireGuard, e o "tap" dentro de "laptop" não o tira);
+        // `nordlynx` é o WireGuard do NordVPN.
+        assert!(vpn_camada3("wg-laptop"), "o tap só pela palavra");
+        for sim in
+            ["wg0", "tun0", "utun3", "tailscale0", "WireGuard Tunnel", "OpenVPN Data Channel Offload", "nordlynx"]
+        {
+            assert!(vpn_camada3(sim), "{sim}");
+        }
+        for nao in [
+            "tap0",
+            "OpenVPN TAP-Windows6",
+            "TAP-Windows Adapter V9",
+            "zt3jnxyz",
+            "ZeroTier One",
+            "eth0",
+            "wlan0",
+            "docker0",
+            "veth12",
+            "rmnet0",
+            "tunl0",
+        ] {
+            assert!(!vpn_camada3(nao), "{nao}");
+        }
+        let lista = vec![
+            Interface::de_teste("eth0", [192, 168, 0, 10], 24, Tipo::Cabo),
+            Interface::de_teste("wg0", [10, 8, 0, 2], 24, Tipo::Virtual),
+            Interface::de_teste("tap0", [10, 9, 0, 2], 24, Tipo::Virtual),
+        ];
+        assert_eq!(vpns(&lista), vec![("wg0".to_string(), Ipv4Addr::new(10, 8, 0, 2))]);
+        // R1 M1: a VPN desligada não aparece (a tela diria um endereço que não responde).
+        let mut desligada = Interface::de_teste("wg1", [10, 8, 1, 2], 24, Tipo::Virtual);
+        desligada.com_sinal = false;
+        assert!(vpns(&[desligada]).is_empty(), "VPN desligada não vai à tela");
+    }
+
+    /// R1 A1 e R2 M1/M2 da T003, pela função do sistema e pela leitura da tela: num namespace de rede próprio
+    /// (`unshare -rn`), cria a `wg9` (WireGuard, ponto a ponto e com sinal) e a `tun9` (ponto a ponto, sem ninguém do
+    /// outro lado, sem sinal). Confere:
+    /// - o [`listar_para_vpns`] vê as duas, e o [`listar`] (o do anúncio) não vê nenhuma;
+    /// - a leitura da tela (`sync_ler`, chave `vpns`) mostra a `wg9` com o IP e não mostra a `tun9`;
+    /// - com a `wg9` desligada (`ip link set wg9 down`), ela some da tela.
+    ///
+    /// Sem o namespace, o programa `ip`, a WireGuard ou o `/dev/net/tun`, **reprova**; só pula com
+    /// `RUSTINHO_PULAR_LAB_REDE=1`, dito em voz alta (R2 B4: nunca passa calado).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn t003_lab_tun_de_verdade() {
+        if std::env::var("RUSTINHO_LAB_VPN_DENTRO").is_ok() {
+            let com = listar_para_vpns().expect("listar com as ponto a ponto");
+            for nome in ["wg9", "tun9"] {
+                assert!(com.iter().any(|i| i.nome == nome), "a {nome} não veio: {com:?}");
+            }
+            let sem = listar().expect("listar do anúncio");
+            assert!(
+                !sem.iter().any(|i| i.nome == "wg9" || i.nome == "tun9"),
+                "o anúncio continua sem as ponto a ponto"
+            );
+            let tela = |rotulo: &str| -> Vec<(String, String)> {
+                let pasta = std::env::temp_dir().join(format!("rustinho-lab-vpn-{rotulo}-{}", std::process::id()));
+                std::fs::create_dir_all(&pasta).unwrap();
+                let mut s = crate::Servico::abrir_para_teste(&pasta.join("rustinho.db"), false).unwrap();
+                let v: serde_json::Value = serde_json::from_str(&s.chamar("sync_ler", "{}")).unwrap();
+                drop(s);
+                let _ = std::fs::remove_dir_all(&pasta); // R3 B6: a pasta é deste teste
+                v["dados"]["vpns"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("a leitura da tela não tem a chave vpns: {v}"))
+                    .iter()
+                    .map(|x| (x["nome"].as_str().unwrap().to_string(), x["ip"].as_str().unwrap().to_string()))
+                    .collect()
+            };
+            assert_eq!(
+                tela("ligada"),
+                vec![("wg9".to_string(), "10.98.0.1".to_string())],
+                "a tela mostra só a wg9 ligada"
+            );
+            let desliga = std::process::Command::new("ip").args(["link", "set", "wg9", "down"]).status().unwrap();
+            assert!(desliga.success(), "não deu para desligar a wg9");
+            assert!(tela("desligada").is_empty(), "desligada, a wg9 some da tela");
+            return;
+        }
+        if std::env::var("RUSTINHO_PULAR_LAB_REDE").as_deref() == Ok("1") {
+            eprintln!("PULADO DE PROPÓSITO (RUSTINHO_PULAR_LAB_REDE=1): o laboratório da VPN não rodou");
+            return;
+        }
+        let exe = std::env::current_exe().expect("o próprio teste");
+        let roteiro = format!(
+            "ip link set lo up && ip link add wg9 type wireguard && ip addr add 10.98.0.1/24 dev wg9 \
+             && ip link set wg9 up && ip tuntap add dev tun9 mode tun && ip addr add 10.99.0.1/24 dev tun9 \
+             && ip link set tun9 up && exec '{}' --exact troca::rede_local::testes::t003_lab_tun_de_verdade \
+             --test-threads=1 --nocapture",
+            exe.display()
+        );
+        let saida = std::process::Command::new("unshare")
+            .args(["-rn", "sh", "-c", &roteiro])
+            .env("RUSTINHO_LAB_VPN_DENTRO", "1")
+            .output()
+            .expect("o programa unshare (o laboratório exige; RUSTINHO_PULAR_LAB_REDE=1 pula de propósito)");
+        let texto = String::from_utf8_lossy(&saida.stdout).to_string();
+        assert!(
+            saida.status.success() && texto.contains("1 passed"),
+            "o laboratório da VPN falhou:\n{texto}\n{}",
+            String::from_utf8_lossy(&saida.stderr)
+        );
     }
 }

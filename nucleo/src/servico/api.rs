@@ -2802,8 +2802,15 @@ impl Servico {
             "ocupantePorta": ocupante,
             "senhaFraca": sync::senha_fora_da_politica(conn)?,
             "enderecos": a.enderecos.join(", "),
+            // E6-1 (T002 da 009): o IP de cada nome digitado, resolvido no último ciclo (ou o erro).
+            "nomesResolvidos": nomes_para_a_tela(&a.enderecos, sync::nomes_resolvidos(), ativa),
             "interfaces": a.interfaces.join(", "),
             "interfacesIgnoradas": sync::interfaces_ignoradas(&a.interfaces),
+            // E6-1 (T003 da 009): as VPNs de camada 3 deste computador, só para informar.
+            "vpns": crate::rede_local::vpns(&crate::rede_local::listar_para_vpns().unwrap_or_default())
+                .into_iter()
+                .map(|(nome, ip)| json!({ "nome": nome, "ip": ip.to_string() }))
+                .collect::<Vec<_>>(),
             "caixa": a.nome,
             "pares": sync::pares(conn)?,
             "meuEndereco": endereco_local(),
@@ -3668,6 +3675,44 @@ struct Impressao {
     id: String,
 }
 
+/// E6-1 (T002 da 009), R1 B4 e M5: os nomes digitados e o que cada um deu no último ciclo, para a tela. Só os nomes que
+/// ainda estão digitados; com a troca parada, nada (nada é resolvido, e a tela não mostra resultado velho).
+fn nomes_para_a_tela(enderecos: &[String], resolvidos: Vec<(String, String)>, ativa: bool) -> Vec<Value> {
+    if !ativa {
+        return Vec::new();
+    }
+    resolvidos
+        .into_iter()
+        .filter(|(n, _)| enderecos.iter().any(|e| e.split(':').next() == Some(n.as_str())))
+        .map(|(n, r)| json!({ "nome": n, "resultado": r }))
+        .collect()
+}
+
+#[cfg(test)]
+mod testes_nomes_para_a_tela {
+    use super::*;
+
+    #[test]
+    fn t002_r1_a_tela_so_mostra_os_digitados_e_so_com_a_troca_ligada() {
+        let enderecos = vec!["caixa2.loja.local".to_string(), "caixa3:47820".to_string()];
+        let resolvidos = vec![
+            ("caixa2.loja.local".to_string(), "10.0.0.2".to_string()),
+            ("caixa3".to_string(), "não respondeu a tempo".to_string()),
+            ("velho.loja.local".to_string(), "10.0.0.9".to_string()),
+        ];
+        let tela = nomes_para_a_tela(&enderecos, resolvidos.clone(), true);
+        assert_eq!(
+            tela,
+            vec![
+                json!({ "nome": "caixa2.loja.local", "resultado": "10.0.0.2" }),
+                json!({ "nome": "caixa3", "resultado": "não respondeu a tempo" }),
+            ],
+            "o nome que saiu da lista não aparece; o com porta, sim"
+        );
+        assert!(nomes_para_a_tela(&enderecos, resolvidos, false).is_empty(), "troca parada: nada de resultado velho");
+    }
+}
+
 /// Endereço deste computador na rede local (para digitar nos outros caixas).
 fn endereco_local() -> String {
     // Não envia nada: só pergunta ao sistema por qual endereço sairia.
@@ -3711,8 +3756,9 @@ struct Convivencia {
 fn enderecos_digitados(texto: &str) -> Resultado<Vec<String>> {
     let mut lista = Vec::new();
     for e in texto.split([',', ' ', ';', '\n']).map(str::trim).filter(|e| !e.is_empty()) {
-        if e.parse::<std::net::IpAddr>().is_err() && e.parse::<std::net::SocketAddr>().is_err() {
-            return Err(Erro::campo("enderecos", format!("Endereço inválido: {e} (ex.: 192.168.0.12)")));
+        // E6-1 (T002 da 009): IP, IP:porta, nome ou nome:porta.
+        if !crate::sync::endereco_valido(e) {
+            return Err(Erro::campo("enderecos", crate::troca::sync::texto_de_endereco_invalido(e)));
         }
         lista.push(e.to_string());
     }
@@ -4970,6 +5016,31 @@ mod testes {
                 .to_string(),
         );
         assert_eq!(c["ok"], true, "{c}");
+    }
+
+    /// R3 M1 (T002 da 009): a tela recebe, pela leitura de verdade (`sync_ler`), o IP que cada nome digitado deu; com a
+    /// troca desligada, nada.
+    #[test]
+    fn t002_r3_a_tela_recebe_os_nomes_resolvidos() {
+        let _t = crate::troca::sync::resolvedor_de_teste::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _r = crate::troca::sync::resolvedor_de_teste::Resolvedor::usar(|_| {
+            Some(std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 4, 0, 4)))
+        });
+        let mut s = conectado();
+        let ligar = |s: &mut Servico, ligado: bool| {
+            chamar(
+                s,
+                "sync_salvar",
+                &json!({ "ligado": ligado, "senha": "bola-de-gude-azul", "enderecos": "caixa9.loja.local" })
+                    .to_string(),
+            )
+        };
+        assert_eq!(ligar(&mut s, true)["ok"], true);
+        crate::troca::sync::resolver_digitados_para_teste(&s.banco.conn);
+        let ler = |s: &mut Servico| chamar(s, "sync_ler", "{}")["dados"]["nomesResolvidos"].clone();
+        assert_eq!(ler(&mut s), json!([{ "nome": "caixa9.loja.local", "resultado": "10.4.0.4" }]));
+        assert_eq!(ligar(&mut s, false)["ok"], true);
+        assert_eq!(ler(&mut s), json!([]), "troca desligada: nada de resultado velho");
     }
 
     /// F17-A8: senha da rede da loja: nova segue a política; a que já estava gravada não é forçada

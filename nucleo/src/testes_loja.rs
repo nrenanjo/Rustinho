@@ -891,7 +891,7 @@ fn k_salvar_a_troca_de_dados_e_tudo_ou_nada() {
     let r = chamar(
         &mut s,
         "sync_salvar",
-        json!({ "ligado": false, "senha": "", "enderecos": "isto-nao-e-endereco", "interfaces": "tun0" }),
+        json!({ "ligado": false, "senha": "", "enderecos": "isto_nao_e_endereco", "interfaces": "tun0" }),
     );
     assert_eq!(r["ok"], false, "{r}");
     assert_eq!(r["campo"], "enderecos", "{r}");

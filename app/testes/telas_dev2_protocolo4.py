@@ -189,7 +189,7 @@ def caixa_novo_na_tela(fotos, logs, conferir):
             return
         time.sleep(0.5)
         digitar(convite)
-        if not rr.clicar("Aparece junto do convite. Ex.: 192.168.0.12"):
+        if not rr.clicar("Aparece junto do convite.", comeca=True):
             conferir("P2", "o caixa novo entra pelo convite, sem a senha da rede", False, "sem o campo do endereço")
             return
         time.sleep(0.3)

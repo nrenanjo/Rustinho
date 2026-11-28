@@ -4,6 +4,7 @@
 //! fora a visibilidade `pub(super)`, que tem o mesmo alcance de antes).
 
 use super::*;
+use std::net::IpAddr;
 
 /// F89-4: a pausa entre uma resposta e a próxima, mais que um passo da espera
 /// do SQLite (100 ms). Custa ~0,12 s a cada 200 alterações recebidas.
@@ -24,19 +25,282 @@ pub(super) fn puxar_ate(
     puxar_por(caminho, endereco, porta_local, parar, None).map(|p| (p.dispositivo, p.total))
 }
 
-/// O endereço de um caixa como `SocketAddr` (sem porta = a porta da troca).
+/// O endereço de um caixa como `SocketAddr` (sem porta = a porta da troca). E6-1 (T002 da 009): aceita também um
+/// nome (`caixa2.loja.local`, `caixa2:47810`), resolvido a cada chamada, com limite de tempo (`resolver`).
 pub(super) fn endereco_completo(endereco: &str) -> Resultado<SocketAddr> {
-    match endereco.parse::<SocketAddr>() {
-        Ok(s) => Ok(s),
-        Err(_) => format!("{endereco}:{}", crate::portatil::portas().0)
-            .parse()
-            .map_err(|_| Erro::validacao("Endereço inválido.")),
+    if let Ok(s) = endereco.parse::<SocketAddr>() {
+        return Ok(s);
+    }
+    if let Ok(ip) = endereco.parse::<std::net::IpAddr>() {
+        return Ok(SocketAddr::new(ip, crate::portatil::portas().0));
+    }
+    let (nome, porta) = separar_porta(endereco).ok_or_else(|| Erro::validacao("Endereço inválido."))?;
+    if !nome_valido(nome) {
+        return Err(Erro::validacao("Endereço inválido."));
+    }
+    resolver(nome, porta.unwrap_or(crate::portatil::portas().0))
+}
+
+/// E6-1: o texto digitado é um endereço aceito (IP, IP:porta, nome ou nome:porta)?
+pub(crate) fn endereco_valido(e: &str) -> bool {
+    e.parse::<std::net::IpAddr>().is_ok()
+        || e.parse::<SocketAddr>().is_ok()
+        || separar_porta(e).is_some_and(|(nome, _)| nome_valido(nome))
+}
+
+/// R3 B7 (T002 da 009): a mensagem de um endereço digitado que não vale, com o motivo. O engano mais comum é o nome de
+/// computador do Windows com sublinhado (`CAIXA_2`), que não é um nome de rede válido.
+pub(crate) fn texto_de_endereco_invalido(e: &str) -> String {
+    let motivo = if e.contains('_') {
+        "nome com sublinhado não vale na rede; use hífen (caixa-2) ou o número"
+    } else if e.contains(char::is_whitespace) {
+        "sem espaços"
+    } else {
+        "use o número (192.168.0.12) ou o nome (caixa2.loja.local)"
+    };
+    format!("Endereço inválido: {e} ({motivo})")
+}
+
+/// "nome:porta" ou "nome" (o nome sem ":"; a porta de 1 a 65535).
+fn separar_porta(e: &str) -> Option<(&str, Option<u16>)> {
+    match e.rsplit_once(':') {
+        Some((nome, porta)) => Some((nome, Some(porta.parse::<u16>().ok().filter(|p| *p > 0)?))),
+        None => Some((e, None)),
     }
 }
 
-/// Os endereços digitados, já com a porta.
-pub(super) fn digitados_completos(a: &Ajustes) -> Vec<String> {
-    a.enderecos.iter().filter_map(|e| endereco_completo(e).ok()).map(|s| s.to_string()).collect()
+/// Um nome de computador ou de domínio (RFC 1123): até 253 caracteres; partes de 1 a 63, de letras, números e "-",
+/// sem começar nem terminar com "-"; não pode ser só números e pontos (aí é um IP mal escrito).
+fn nome_valido(n: &str) -> bool {
+    let n = n.strip_suffix('.').unwrap_or(n);
+    !n.is_empty()
+        && n.len() <= 253
+        && !n.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && n.split('.').all(|p| {
+            !p.is_empty()
+                && p.len() <= 63
+                && !p.starts_with('-')
+                && !p.ends_with('-')
+                && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+}
+
+/// E6-1: quanto a resolução de um nome pode demorar (a troca não espera mais que isso).
+const LIMITE_DO_NOME: Duration = Duration::from_secs(2);
+
+/// O último resultado de cada nome (para a tela mostrar o IP resolvido, ou o erro).
+static RESOLVIDOS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+/// Os nomes resolvidos por último: (nome, IP ou o erro), para a tela.
+pub fn nomes_resolvidos() -> Vec<(String, String)> {
+    RESOLVIDOS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+fn anotar_resolvido(nome: &str, resultado: String) {
+    {
+        let mut r = RESOLVIDOS.lock().unwrap_or_else(|e| e.into_inner());
+        r.retain(|(n, _)| n != nome);
+        r.push((nome.to_string(), resultado));
+        let excesso = r.len().saturating_sub(64);
+        r.drain(..excesso);
+    }
+}
+
+/// Resolve um nome numa linha à parte, com limite de tempo; o IPv4 tem a preferência. Um nome que não responde a tempo
+/// dá erro, e a linha que ficou presa termina sozinha (ela não segura nada).
+fn resolver(nome: &str, porta: u16) -> Resultado<SocketAddr> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let n = nome.to_string();
+    std::thread::spawn(move || {
+        let _ = tx.send(resolver_agora(&n, porta));
+    });
+    let r = match rx.recv_timeout(LIMITE_DO_NOME) {
+        Ok(Some(a)) => Ok(a),
+        Ok(None) => Err(Erro::validacao(format!("O nome {nome} não foi encontrado na rede."))),
+        Err(_) => Err(Erro::validacao(format!("O nome {nome} não respondeu a tempo."))),
+    };
+    anotar_resolvido(
+        nome,
+        match &r {
+            Ok(a) => texto_do_endereco(a),
+            Err(e) if e.to_string().contains("não respondeu") => "não respondeu a tempo".to_string(),
+            Err(_) => "não foi encontrado na rede".to_string(),
+        },
+    );
+    r
+}
+
+fn resolver_agora(nome: &str, porta: u16) -> Option<SocketAddr> {
+    #[cfg(test)]
+    if let Some(f) = resolvedor_de_teste::QUAL.lock().ok().and_then(|g| *g) {
+        return f(nome).map(|ip| SocketAddr::new(ip, porta));
+    }
+    let todos: Vec<SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(&(nome, porta)).ok()?.collect();
+    todos.iter().find(|a| a.is_ipv4()).or(todos.first()).copied()
+}
+
+/// Só nos testes: um resolvedor no lugar do sistema (nome muda de IP; nome que demora).
+#[cfg(test)]
+pub(crate) mod resolvedor_de_teste {
+    use std::net::IpAddr;
+    use std::sync::Mutex;
+    pub(crate) static QUAL: Mutex<Option<fn(&str) -> Option<IpAddr>>> = Mutex::new(None);
+    /// Os testes que trocam o resolvedor (de qualquer módulo), um de cada vez (R1 B10).
+    pub(crate) static UM_POR_VEZ: Mutex<()> = Mutex::new(());
+
+    /// Troca o resolvedor enquanto existir, e volta ao do sistema ao sair, mesmo se o teste falhar no meio (R2 B8).
+    pub(crate) struct Resolvedor;
+    impl Resolvedor {
+        pub(crate) fn usar(f: fn(&str) -> Option<IpAddr>) -> Resolvedor {
+            *QUAL.lock().unwrap_or_else(|e| e.into_inner()) = Some(f);
+            Resolvedor
+        }
+    }
+    impl Drop for Resolvedor {
+        fn drop(&mut self) {
+            *QUAL.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
+}
+
+/// O último IP bom de cada nome digitado, para quando o nome falhar (R1 M3). Por nome: as portas digitadas usam o mesmo
+/// IP (R2 M3). Podado quando o nome sai da lista; o `0.0.0.0` nunca entra (R2 B7).
+static ULTIMO_BOM: Mutex<Vec<(String, IpAddr)>> = Mutex::new(Vec::new());
+/// Os nomes com uma consulta ao sistema em andamento, com a hora em que começou: no máximo uma por nome (R1 B3). Uma
+/// consulta com mais de 60 s perde a vez (R2 B3: a rede de segurança se o sistema nunca devolver).
+static EM_VOO: Mutex<Vec<(String, std::time::Instant)>> = Mutex::new(Vec::new());
+const IDADE_MAXIMA_EM_VOO: Duration = Duration::from_secs(60);
+
+/// Os endereços digitados, já com a porta (R1 M2 e M3, R2 M3 da T002):
+/// - os IPs passam direto;
+/// - cada **nome** é resolvido **uma vez** (mesmo digitado com portas diferentes), todos ao mesmo tempo, com prazo
+///   **total** de 2 s, ouvindo o `parar`;
+/// - **fora** de qualquer trava (quem chama resolve antes de pegar a trava);
+/// - um nome que falha (não achado, demorou, ou já tem consulta presa) fica com o **último IP bom**, se houver: a troca
+///   continua pelo IP que funcionava, e a tela diz o que houve.
+pub(super) fn digitados_completos(a: &Ajustes, parar: &AtomicBool) -> Vec<String> {
+    let porta_padrao = crate::portatil::portas().0;
+    let mut saida = Vec::new();
+    let mut entradas: Vec<(String, u16)> = Vec::new();
+    for e in &a.enderecos {
+        if let Ok(s) = e.parse::<SocketAddr>() {
+            saida.push(s.to_string());
+        } else if let Ok(ip) = e.parse::<IpAddr>() {
+            saida.push(SocketAddr::new(ip, porta_padrao).to_string());
+        } else if let Some((nome, porta)) = separar_porta(e).filter(|(n, _)| nome_valido(n)) {
+            entradas.push((nome.to_string(), porta.unwrap_or(porta_padrao)));
+        }
+    }
+    let mut nomes: Vec<String> = Vec::new();
+    for (n, _) in &entradas {
+        if !nomes.contains(n) {
+            nomes.push(n.clone());
+        }
+    }
+    ULTIMO_BOM.lock().unwrap_or_else(|e| e.into_inner()).retain(|(n, _)| nomes.contains(n));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut esperando = 0usize;
+    for nome in &nomes {
+        let ja_em_voo = {
+            let mut v = EM_VOO.lock().unwrap_or_else(|e| e.into_inner());
+            v.retain(|(_, desde)| desde.elapsed() < IDADE_MAXIMA_EM_VOO);
+            if v.iter().any(|(n, _)| n == nome) {
+                true
+            } else {
+                v.push((nome.clone(), std::time::Instant::now()));
+                false
+            }
+        };
+        if ja_em_voo {
+            continue;
+        }
+        let (tx, dentro) = (tx.clone(), nome.clone());
+        let lancou = std::thread::Builder::new().name("resolver-nome".into()).spawn(move || {
+            // R3 B3: o 0.0.0.0 (um DNS que bloqueia nomes devolve isso) é uma falha, e não um endereço.
+            let ip = resolver_agora(&dentro, 0).map(|a| a.ip()).filter(|ip| !ip.is_unspecified());
+            if let Some(ip) = ip {
+                // Mesmo que a resposta chegue depois do prazo, ela vale para o próximo ciclo (R2 B3).
+                let mut v = ULTIMO_BOM.lock().unwrap_or_else(|e| e.into_inner());
+                v.retain(|(n, _)| *n != dentro);
+                v.push((dentro.clone(), ip));
+                let excesso = v.len().saturating_sub(64);
+                v.drain(..excesso);
+            }
+            EM_VOO.lock().unwrap_or_else(|e| e.into_inner()).retain(|(n, _)| *n != dentro);
+            let _ = tx.send((dentro, ip));
+        });
+        if lancou.is_ok() {
+            esperando += 1;
+        } else {
+            EM_VOO.lock().unwrap_or_else(|e| e.into_inner()).retain(|(n, _)| n != nome);
+        }
+    }
+    drop(tx);
+    let mut respostas: Vec<(String, Option<IpAddr>)> = Vec::new();
+    let fim = std::time::Instant::now() + LIMITE_DO_NOME;
+    while respostas.len() < esperando && !parar.load(std::sync::atomic::Ordering::SeqCst) {
+        let falta = fim.saturating_duration_since(std::time::Instant::now());
+        if falta.is_zero() {
+            break;
+        }
+        match rx.recv_timeout(falta.min(Duration::from_millis(50))) {
+            Ok(r) => respostas.push(r),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    for nome in &nomes {
+        let resposta = respostas.iter().find(|(n, _)| n == nome).map(|(_, r)| *r);
+        let ultimo =
+            ULTIMO_BOM.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(n, _)| n == nome).map(|(_, ip)| *ip);
+        let ip = match resposta {
+            Some(Some(ip)) => {
+                anotar_resolvido(nome, texto_do_ip(&ip));
+                Some(ip)
+            }
+            outra => {
+                let motivo = if outra.is_some() { "não foi encontrado na rede" } else { "não respondeu a tempo" };
+                match ultimo {
+                    Some(bom) => {
+                        anotar_resolvido(nome, format!("{motivo}; usando o último endereço bom, {bom}"));
+                        Some(bom)
+                    }
+                    None => {
+                        anotar_resolvido(nome, motivo.to_string());
+                        None
+                    }
+                }
+            }
+        };
+        if let Some(ip) = ip {
+            for (n, porta) in &entradas {
+                if n == nome {
+                    saida.push(SocketAddr::new(ip, *porta).to_string());
+                }
+            }
+        }
+    }
+    saida
+}
+
+/// Só nos testes (R3 M1): roda a resolução dos endereços digitados como o ciclo faz, sem o motor.
+#[cfg(test)]
+pub(crate) fn resolver_digitados_para_teste(conn: &rusqlite::Connection) -> Vec<String> {
+    let a = super::ajustes::ajustes(conn).expect("os ajustes da troca");
+    digitados_completos(&a, &AtomicBool::new(false))
+}
+
+/// O IP para a tela; o do próprio computador é avisado (R1 B2).
+fn texto_do_ip(ip: &IpAddr) -> String {
+    if ip.is_loopback() || ip.is_unspecified() {
+        format!("{ip} (este próprio computador)")
+    } else {
+        ip.to_string()
+    }
+}
+
+fn texto_do_endereco(a: &SocketAddr) -> String {
+    texto_do_ip(&a.ip())
 }
 
 /// Puxa de **um caminho** (`endereco`), saindo pela `saida` planejada quando
@@ -605,5 +869,225 @@ pub(super) fn guardar_problema(problemas: &Mutex<Vec<String>>, texto: String) {
     let mut p = problemas.lock().unwrap_or_else(|e| e.into_inner());
     if !p.contains(&texto) {
         p.push(texto);
+    }
+}
+
+/// E6-1 (T002 da 009): o endereço de outro caixa pode ser um nome.
+#[cfg(test)]
+mod testes_nomes {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    use super::resolvedor_de_teste::UM_POR_VEZ;
+
+    use super::resolvedor_de_teste::Resolvedor;
+
+    #[test]
+    fn t002_validacao_aceita_nomes_e_recusa_lixo() {
+        for bom in [
+            "192.168.0.12",
+            "192.168.0.12:47810",
+            "caixa2",
+            "caixa2.loja.local",
+            "caixa-2.loja.local:47810",
+            "loja.exemplo.com.",
+        ] {
+            assert!(endereco_valido(bom), "{bom}");
+        }
+        for ruim in [
+            "",
+            "-caixa",
+            "caixa-",
+            "caixa_2",
+            "caixa 2",
+            "192.168.0",
+            "192.168.0.300",
+            "caixa2:0",
+            "caixa2:70000",
+            "a..b",
+            "ca*ixa",
+        ] {
+            assert!(!endereco_valido(ruim), "{ruim}");
+        }
+        let longo = format!("{}.local", "a".repeat(64));
+        assert!(!endereco_valido(&longo), "parte com mais de 63");
+    }
+
+    #[test]
+    fn t002_salvar_aceita_nome() {
+        let b = crate::banco::Banco::em_memoria().unwrap();
+        salvar_ajustes(&b.conn, false, "", "caixa2.loja.local, 192.168.0.5:47810").unwrap();
+        let e = salvar_ajustes(&b.conn, false, "", "caixa_2").unwrap_err();
+        assert_eq!(e.nome_do_campo(), Some("enderecos"));
+        // R3 B7: a mensagem diz o motivo (o nome do Windows com sublinhado).
+        assert!(e.to_string().contains("sublinhado"), "{e}");
+    }
+
+    #[test]
+    fn t002_nome_que_resolve_e_que_nao_resolve() {
+        let _t = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let a = endereco_completo("localhost:47999").unwrap();
+        assert_eq!(a, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 47999), "localhost, pelo resolvedor do sistema");
+        // R2 B8: o nome que não existe vem do resolvedor de teste (um DNS que responde a tudo faria ele "existir").
+        let _r = Resolvedor::usar(|_| None);
+        let e = endereco_completo("nao-existe.invalid").unwrap_err().to_string();
+        assert!(e.contains("não foi encontrado") || e.contains("não respondeu"), "{e}");
+        assert!(
+            nomes_resolvidos()
+                .iter()
+                .any(|(n, r)| n == "nao-existe.invalid"
+                    && (r.contains("não foi encontrado") || r.contains("não respondeu"))),
+            "a tela vê o erro"
+        );
+    }
+
+    #[test]
+    fn t002_nome_que_muda_de_ip() {
+        let _t = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        static VEZ: AtomicU8 = AtomicU8::new(0);
+        VEZ.store(0, Ordering::SeqCst);
+        let _r =
+            Resolvedor::usar(|_| Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1 + VEZ.fetch_add(1, Ordering::SeqCst)))));
+        let um = endereco_completo("caixa2.loja.local").unwrap();
+        let dois = endereco_completo("caixa2.loja.local").unwrap();
+        assert_eq!(um.ip().to_string(), "10.0.0.1");
+        assert_eq!(dois.ip().to_string(), "10.0.0.2", "resolvido de novo a cada vez");
+        assert!(nomes_resolvidos().iter().any(|(n, r)| n == "caixa2.loja.local" && r == "10.0.0.2"));
+    }
+
+    #[test]
+    fn t002_nome_que_demora_tem_limite() {
+        let _t = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _r = Resolvedor::usar(|_| {
+            std::thread::sleep(Duration::from_secs(5));
+            Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9)))
+        });
+        let inicio = std::time::Instant::now();
+        let e = endereco_completo("lento.loja.local").unwrap_err().to_string();
+        let levou = inicio.elapsed();
+        assert!(e.contains("não respondeu a tempo"), "{e}");
+        assert!(levou < Duration::from_secs(3), "esperou {levou:?}");
+    }
+
+    fn ajustes_com(enderecos: &[&str]) -> Ajustes {
+        Ajustes { enderecos: enderecos.iter().map(|e| e.to_string()).collect(), ..Ajustes::default() }
+    }
+
+    /// R1 M2: três nomes lentos são resolvidos ao mesmo tempo, e não um depois do outro.
+    #[test]
+    fn t002_r1_nomes_ao_mesmo_tempo() {
+        let _t = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _r = Resolvedor::usar(|nome| {
+            std::thread::sleep(Duration::from_millis(900));
+            Some(IpAddr::V4(Ipv4Addr::new(10, 1, 0, nome.len() as u8)))
+        });
+        let a = ajustes_com(&["um.loja.local", "dois.loja.local", "tres.loja.local:47820"]);
+        let inicio = std::time::Instant::now();
+        let r = digitados_completos(&a, &AtomicBool::new(false));
+        let levou = inicio.elapsed();
+        assert_eq!(r.len(), 3, "{r:?}");
+        assert!(levou < Duration::from_millis(1800), "em série levaria 2,7 s; levou {levou:?}");
+        assert!(r.iter().any(|e| e.ends_with(":47820")), "a porta digitada fica: {r:?}");
+    }
+
+    /// R1 M2: o prazo é total (2 s), e o pedido de parada é ouvido.
+    #[test]
+    fn t002_r1_prazo_total_e_parar() {
+        let _t = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _r = Resolvedor::usar(|_| {
+            std::thread::sleep(Duration::from_secs(4));
+            None
+        });
+        let a = ajustes_com(&["lento1.loja.local", "lento2.loja.local", "192.168.0.9"]);
+        let inicio = std::time::Instant::now();
+        let r = digitados_completos(&a, &AtomicBool::new(false));
+        assert!(inicio.elapsed() < Duration::from_millis(2900), "prazo total, não por nome: {:?}", inicio.elapsed());
+        assert_eq!(r, vec![format!("192.168.0.9:{}", crate::portatil::portas().0)], "o IP passa direto");
+        // Pedido de parada: volta logo.
+        let parar = std::sync::Arc::new(AtomicBool::new(false));
+        let p2 = parar.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            p2.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let a = ajustes_com(&["lento3.loja.local"]);
+        let inicio = std::time::Instant::now();
+        let _ = digitados_completos(&a, &parar);
+        assert!(inicio.elapsed() < Duration::from_millis(1000), "ouviu o parar: {:?}", inicio.elapsed());
+        std::thread::sleep(Duration::from_millis(4200)); // as consultas presas terminam antes do próximo teste
+    }
+
+    /// R1 M3: o nome que falha fica com o último endereço bom (a troca continua pelo IP que funcionava).
+    #[test]
+    fn t002_r1_ultimo_endereco_bom() {
+        let _t = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        static VEZ: AtomicU8 = AtomicU8::new(0);
+        VEZ.store(0, Ordering::SeqCst);
+        let _r = Resolvedor::usar(|_| {
+            if VEZ.fetch_add(1, Ordering::SeqCst) == 0 {
+                Some(IpAddr::V4(Ipv4Addr::new(10, 2, 0, 7)))
+            } else {
+                None
+            }
+        });
+        let a = ajustes_com(&["vpn.loja.local"]);
+        let primeiro = digitados_completos(&a, &AtomicBool::new(false));
+        let segundo = digitados_completos(&a, &AtomicBool::new(false));
+        assert_eq!(primeiro, segundo, "o último endereço bom continua: {segundo:?}");
+        assert!(segundo[0].starts_with("10.2.0.7:"), "{segundo:?}");
+        let tela = nomes_resolvidos();
+        assert!(
+            tela.iter()
+                .any(|(n, r)| n == "vpn.loja.local" && r.contains("último endereço bom") && r.contains("10.2.0.7")),
+            "a tela diz o que houve: {tela:?}"
+        );
+    }
+
+    /// R2 M3: o mesmo nome com duas portas: as duas saem, com o mesmo IP, e a tela não mostra erro.
+    #[test]
+    fn t002_r2_mesmo_nome_duas_portas() {
+        let _t = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let _r = Resolvedor::usar(|_| Some(IpAddr::V4(Ipv4Addr::new(10, 3, 0, 4))));
+        let a = ajustes_com(&["loja2.ddns.local", "loja2.ddns.local:47820"]);
+        let r = digitados_completos(&a, &AtomicBool::new(false));
+        let padrao = crate::portatil::portas().0;
+        assert_eq!(r, vec![format!("10.3.0.4:{padrao}"), "10.3.0.4:47820".to_string()], "as duas portas");
+        let tela = nomes_resolvidos();
+        assert!(
+            tela.iter().any(|(n, r)| n == "loja2.ddns.local" && r == "10.3.0.4"),
+            "a tela mostra o IP, sem erro: {tela:?}"
+        );
+    }
+
+    /// R1 B3: no máximo uma consulta presa por nome; R1 B2: o próprio computador é avisado.
+    #[test]
+    fn t002_r1_uma_consulta_por_nome_e_o_proprio() {
+        let _t = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        static CONSULTAS: AtomicU8 = AtomicU8::new(0);
+        CONSULTAS.store(0, Ordering::SeqCst);
+        let _r = Resolvedor::usar(|_| {
+            CONSULTAS.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(3000));
+            None
+        });
+        let a = ajustes_com(&["preso.loja.local"]);
+        let _ = digitados_completos(&a, &AtomicBool::new(false));
+        let _ = digitados_completos(&a, &AtomicBool::new(false));
+        assert_eq!(
+            CONSULTAS.load(Ordering::SeqCst),
+            1,
+            "a segunda não abre outra consulta enquanto a primeira está presa"
+        );
+        std::thread::sleep(Duration::from_millis(1500));
+        drop(_r);
+        let _r = Resolvedor::usar(|_| Some(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        let a = ajustes_com(&["eu.loja.local"]);
+        let _ = digitados_completos(&a, &AtomicBool::new(false));
+        assert!(
+            nomes_resolvidos().iter().any(|(n, r)| n == "eu.loja.local" && r.contains("este próprio computador")),
+            "{:?}",
+            nomes_resolvidos()
+        );
     }
 }

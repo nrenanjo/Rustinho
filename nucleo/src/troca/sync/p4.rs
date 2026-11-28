@@ -702,15 +702,10 @@ pub fn aprovar_este_caixa_com_convite(
     entrar_com_convite(caminho, convite, enderecos, QuemEntra::JaDaLoja)
 }
 
-fn entrar_com_convite(
-    caminho: &Path,
-    convite: &str,
-    enderecos: &[String],
-    quem: QuemEntra,
-) -> Resultado<EntradaPeloConvite> {
-    let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
-    let mut conn = abrir_conexao(caminho)?;
-    let usuarios = crate::usuarios::quantidade(&conn)?;
+/// As conferências baratas da entrada pelo convite (só leitura do banco): devolve a loja deste caixa (vazia para o caixa
+/// novo). R3 B5 (T002 da 009): rodam antes da espera pelos nomes, e de novo dentro da trava.
+fn conferir_quem_entra(conn: &Connection, caminho: &Path, quem: QuemEntra) -> Resultado<String> {
+    let usuarios = crate::usuarios::quantidade(conn)?;
     let loja_daqui = match quem {
         QuemEntra::CaixaNovo => {
             if usuarios > 0 {
@@ -724,16 +719,35 @@ fn entrar_com_convite(
                     "Este caixa ainda não é de uma loja: use Juntar este caixa, na tela de boas-vindas.",
                 ));
             }
-            let l = crate::loja::id(&conn)?;
+            let l = crate::loja::id(conn)?;
             if l.is_empty() {
                 return Err(Erro::validacao(TEXTO_SEM_IDENTIDADE_DA_LOJA));
             }
-            if contexto(&conn, caminho).is_some() {
+            if contexto(conn, caminho).is_some() {
                 return Err(Erro::validacao(TEXTO_JA_APROVADO));
             }
             l
         }
     };
+    Ok(loja_daqui)
+}
+
+fn entrar_com_convite(
+    caminho: &Path,
+    convite: &str,
+    enderecos: &[String],
+    quem: QuemEntra,
+) -> Resultado<EntradaPeloConvite> {
+    // R3 B5: as conferências baratas primeiro (sem esperar nenhum nome).
+    conferir_quem_entra(&abrir_conexao(caminho)?, caminho, quem)?;
+    // R2 B10 (T002 da 009): os nomes (até 2 s cada) são resolvidos ANTES de pegar a trava da troca; dentro dela fica
+    // só o banco e a entrada.
+    let qr_resolvido = endereco_completo(canal::interpretar_convite_entrada(convite)?.endereco.trim()).ok();
+    let digitados: Vec<Resultado<SocketAddr>> =
+        enderecos.iter().filter(|e| !e.trim().is_empty()).map(|e| endereco_completo(e.trim())).collect();
+    let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+    let mut conn = abrir_conexao(caminho)?;
+    let loja_daqui = conferir_quem_entra(&conn, caminho, quem)?;
     let qr = canal::interpretar_convite_entrada(convite)?;
     if quem == QuemEntra::JaDaLoja && !qr.loja_id.is_empty() && qr.loja_id != loja_daqui {
         return Err(Erro::campo("convite", TEXTO_CONVITE_DE_OUTRA_LOJA));
@@ -746,11 +760,19 @@ fn entrar_com_convite(
     let disp = config::ler(&conn, "dispositivo_id")?.unwrap_or_default();
     let pedido = aprovados::Pedido::com_dispositivo(&id.identidade, &disp);
     let mut alvos: Vec<SocketAddr> = Vec::new();
-    let candidatos = std::iter::once(qr.endereco.clone()).chain(enderecos.iter().cloned());
-    for e in candidatos.filter(|e| !e.trim().is_empty()) {
-        if let Ok(a) = endereco_completo(e.trim()) {
-            if !alvos.contains(&a) {
-                alvos.push(a);
+    if let Some(a) = qr_resolvido {
+        alvos.push(a);
+    }
+    // E6-1 (T002 da 009): um endereço DIGITADO que não dá certo (um nome que não está na rede, ou que não respondeu a
+    // tempo) é dito no próprio campo, em vez de ser pulado em silêncio. Mas só se nenhum outro caminho (o QR, os
+    // anúncios) funcionar: um nome errado não impede a entrada pelo endereço certo (R1 M4).
+    let mut erro_do_digitado: Option<Erro> = None;
+    for resolvido in digitados {
+        match resolvido {
+            Ok(a) if !alvos.contains(&a) => alvos.push(a),
+            Ok(_) => {}
+            Err(erro) => {
+                erro_do_digitado.get_or_insert_with(|| Erro::campo("enderecos", erro.to_string()));
             }
         }
     }
@@ -759,11 +781,13 @@ fn entrar_com_convite(
             alvos.push(a);
         }
     }
-    if alvos.is_empty() {
+    // R2 B1: só procura pelos anúncios (até 12 s) quando ninguém digitou um endereço; com um nome digitado que não
+    // resolve, o erro dele sai na hora.
+    if alvos.is_empty() && erro_do_digitado.is_none() {
         alvos = procurar_pelos_anuncios(&loja_esperada, PRAZO_DA_PROCURA);
     }
     if alvos.is_empty() {
-        return Err(Erro::validacao(TEXTO_SEM_ENDERECO));
+        return Err(erro_do_digitado.unwrap_or_else(|| Erro::validacao(TEXTO_SEM_ENDERECO)));
     }
     let mut ultimo: Option<Erro> = None;
     for alvo in alvos {
@@ -816,7 +840,9 @@ fn entrar_com_convite(
         tx.commit()?;
         return Ok(EntradaPeloConvite { loja: entrada.loja_id, nome });
     }
-    Err(ultimo.unwrap_or_else(|| Erro::validacao(TEXTO_SEM_ENDERECO)))
+    // R2 B2: houve tentativa de verdade? Vale o erro dela (o convite vencido, por exemplo). O do nome digitado só quando
+    // nenhum caminho foi tentado.
+    Err(ultimo.or(erro_do_digitado).unwrap_or_else(|| Erro::validacao(TEXTO_SEM_ENDERECO)))
 }
 
 /// T012: sem endereço nenhum, o caixa escuta os anúncios `RSA4` por até `prazo`
