@@ -98,7 +98,7 @@ pub struct Recusa {
 impl fmt::Display for Recusa {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let inicio = match self.motivo {
-            Motivo::Malformado => "O arquivo não é um XML de NF-e legível",
+            Motivo::Malformado => "O arquivo não tem uma nota fiscal que dê para ler",
             Motivo::Estrutura => "O XML não está no formato da NF-e assinada",
             Motivo::Algoritmo => "A assinatura usa um padrão que a NF-e não usa",
             Motivo::Resumo => "O conteúdo da nota não é o que foi assinado: ela foi alterada depois da assinatura",
@@ -481,7 +481,9 @@ fn verificar_com<'a>(xml: &'a str, ancoras: &Ancoras, exigir_protocolo: bool) ->
         return Err(recusa(Motivo::Malformado, "aninhamento profundo demais"));
     }
     let opcoes = ParsingOptions { allow_dtd: false, nodes_limit: 1_000_000, ..ParsingOptions::default() };
-    let doc = Document::parse_with_options(x, opcoes).map_err(|e| recusa(Motivo::Malformado, e.to_string()))?;
+    // BUG-20261128-XMSG: o motivo técnico do leitor (em inglês) não vai para a tela; quem anota é o `ler_nota`, que roda
+    // logo depois para explicar a recusa (B-4 da revisão: uma linha só por arquivo).
+    let doc = Document::parse_with_options(x, opcoes).map_err(|_| recusa(Motivo::Malformado, ""))?;
     if profundidade_maxima(&doc) > PROFUNDIDADE_MAXIMA {
         return Err(recusa(Motivo::Malformado, "aninhamento profundo demais"));
     }
