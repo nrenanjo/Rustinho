@@ -58,6 +58,22 @@ def esperar_janela():
         time.sleep(0.2)
 
 
+def esperar_entrada(rr, segundos=60):
+    """Espera a tela de entrada ("Quem está usando?") e devolve os textos dela. Uma espera fixa não basta: o banco abre
+    em segundo plano ("Abrindo o Rustinho…"), e sob carga isso passou de 2 s (bateria da 009, 28/11: o G3 leu a tela
+    de abertura e achou 0 nomes)."""
+    esperar_janela()
+    fim = time.time() + segundos
+    while True:
+        try:
+            t = rr.textos()
+        except Exception:  # a janela ainda não respondeu
+            t = []
+        if any(tx == "Quem está usando?" for _, _, tx in t) or time.time() > fim:
+            return t
+        time.sleep(0.5)
+
+
 def toques(textos):
     """Áreas de toque (--medir-toque): (tipo, componente, classe, nome, x, y, largura, altura)."""
     lista = []
@@ -136,15 +152,15 @@ def main():
         # G3 (antes de entrar) e G2 — celular.
         rr = u.Rustinho(modelo, "TelaPecas", {}, fotos, "g2_g3_celular", celular=True)
         try:
-            time.sleep(2)
+            t = esperar_entrada(rr)
             rr.foto("-entrada")
-            t = rr.textos()
             nomes = [(x, y, tx) for x, y, tx in t if tx in ("Ana", "Bia", "Carlos", "Dani", "Eduarda")]
             fora = [(tx, y) for x, y, tx in nomes if y < 0 or y > CELULAR[1]]
             titulo = textos_com(t, "Quem está usando")
             fora += [("título", y) for _, y, _ in titulo if y < 0]
             conferir("G3", "entrada com 5 usuários: tudo dentro da tela", len(nomes) >= 5 and not fora,
-                     f"{len(nomes)} nomes; fora da tela: {fora}")
+                     f"{len(nomes)} nomes; fora da tela: {fora}"
+                     + ("" if titulo else " (a tela de entrada não apareceu em 60 s)"))
             rr.entrar("Ana")
             time.sleep(3)
             rr.foto("-pecas")
@@ -172,8 +188,7 @@ def main():
         # G5 — entrada no celular: o último nome, e a senha e o Entrar à vista (H20).
         rr = u.Rustinho(modelo, "TelaPecas", {}, fotos, "g5_entrada_celular", celular=True)
         try:
-            time.sleep(2)
-            alvo = [(x, y) for x, y, tx in rr.textos() if tx == "Eduarda"]
+            alvo = [(x, y) for x, y, tx in esperar_entrada(rr) if tx == "Eduarda"]
             if alvo:
                 px, py = rr.ponto(*alvo[0])
                 base.xdo("mousemove", str(px), str(py), "click", "1")
