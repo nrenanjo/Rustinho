@@ -261,20 +261,7 @@ Item {
             _logMov("acompanhar")
     }
 
-    // T039: a pintura da luz depende só do tamanho da área, do tema e de três constantes (Tema.raioCampo, folga e
-    // alcanceLuz); se alguma delas passar a variar, ela também tem de pedir repintura (R18 B-8). A posição vem do x/y do
-    // Canvas. Repintar a cada
-    // mudança de lugar (a cada quadro da rolagem) custava de 0,35 s a 1 s por quadro no desenho por processador (a sombra
-    // de 42 px), e a rolagem guiada virava uma parada seguida de um salto.
-    property real _luzLargura: -1
-    property real _luzAltura: -1
-    onAreaChanged: {
-        if (area.width !== _luzLargura || area.height !== _luzAltura) {
-            _luzLargura = area.width
-            _luzAltura = area.height
-            luz.requestPaint()
-        }
-    }
+    onAreaChanged: luz.requestPaint()
     onWidthChanged: if (alvo) medir()
     onHeightChanged: if (alvo) medir()
     onTopoChanged: if (alvo) medir()
@@ -403,9 +390,6 @@ Item {
             height: camadaDestaque.lh + 2 * guia.alcanceLuz
 
             onPaint: {
-                // T039: cada pintura da luz vai ao registro na medida do movimento (o roteiro P6 conta as pinturas).
-                if (guia.janela && guia.janela.medirMovimento)
-                    console.info("LUZ:" + JSON.stringify({ w: Math.round(camadaDestaque.lw), h: Math.round(camadaDestaque.lh) }))
                 const ctx = getContext("2d")
                 ctx.clearRect(0, 0, width, height)
                 if (camadaDestaque.lw <= 0 || camadaDestaque.lh <= 0)

@@ -56,37 +56,6 @@ def sql(pasta, query, params=()):
         c.close()
 
 
-INICIOS_DE_ROLAGEM = ('"fase":"inicio"', '"fase":"inicio_longa"', '"fase":"lista_inicio"')
-FINS_DE_ROLAGEM = ('"fase":"fim"', '"fase":"interrompido"')
-
-
-def contar_repinturas_iguais(caminho):
-    """T039: no registro, as pinturas LUZ: do mesmo tamanho da anterior dentro de **todas** as rolagens guiadas (do
-    início, comum, longa ou de lista, ao fim ou à interrupção; R18 B-2). Devolve (repinturas, pinturas no arquivo): a
-    segunda é o controle positivo (R18 B-1), para a conferência não passar em vazio se o registro LUZ: sumir."""
-    dentro = False
-    contagem = 0
-    total = 0
-    anterior = None
-    with open(caminho, encoding="utf-8", errors="replace") as f:
-        for ln in f:
-            i = ln.find("LUZ:")
-            if "MOV:" in ln and any(m in ln for m in INICIOS_DE_ROLAGEM):
-                dentro = True
-            elif "MOV:" in ln and any(m in ln for m in FINS_DE_ROLAGEM):
-                dentro = False
-            elif i >= 0:
-                try:
-                    tam = json.loads(ln[i + 4:].strip())
-                except json.JSONDecodeError:
-                    continue
-                total += 1
-                if dentro and tam == anterior:
-                    contagem += 1
-                anterior = tam
-    return contagem, total
-
-
 class App(base.Rustinho):
     def __init__(self, pasta, tela, props, fotos, nome, args_extras=(), env_extras=None):
         self._args_extras = list(args_extras)
@@ -160,11 +129,6 @@ class App(base.Rustinho):
                     except json.JSONDecodeError:
                         pass
         return eventos
-
-    def pinturas_luz_na_rolagem(self):
-        """T039: (repinturas do mesmo tamanho dentro das rolagens guiadas, pinturas no registro). Mudar de tamanho pede
-        pintura (o campo cresce com a mensagem de erro); mudar só de lugar, não."""
-        return contar_repinturas_iguais(self.saida)
 
     def posicao_texto(self, texto):
         for x, y, t in self.textos():
@@ -341,11 +305,6 @@ def main():
                and dist_total > 100 and monotonico
                and 150 <= dur_real <= 1200,
                f"passos={len(rolagens)} dur_real={dur_real}ms inicio={inicios[-1:]}")
-            # T039: a luz só é repintada quando o tamanho da área muda; rolar não muda o tamanho. Antes, cada quadro
-            # da rolagem repintava a luz (a sombra de 42 px), e o "polish" de cada quadro levava de 0,4 s a 1 s.
-            pinturas, pintadas = r.pinturas_luz_na_rolagem()
-            ok("P6 T039: a luz não é repintada do mesmo tamanho durante a rolagem (só muda de lugar)",
-               pintadas >= 1 and pinturas == 0, f"repinturas={pinturas} pinturas_no_registro={pintadas}")
             ok("P6 A6: destaque só entra depois que a rolagem conclui",
                idx_aguarda >= 0 and idx_ativo > idx_aguarda
                and evs[idx_aguarda].get("opacidade", 1) == 0,
