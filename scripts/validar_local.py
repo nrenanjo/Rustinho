@@ -184,8 +184,6 @@ def main():
     qmlrunner = detectar_qmltestrunner(env)
     if qmlrunner:
         env["RUSTINHO_QMLTESTRUNNER"] = qmlrunner
-    # R1 A1 da T003 (009): como na CI, o laboratório da tun9 (unshare) é exigido; sem o namespace, reprova.
-    env["RUSTINHO_EXIGIR_LAB_REDE"] = "1"
 
     # Isola HOME / XDG_* / TMPDIR em diretório temporário dedicado para L0, L1/L2,
     # L3:testes-programa e L3:qml_* (defesa em profundidade contra interferência no

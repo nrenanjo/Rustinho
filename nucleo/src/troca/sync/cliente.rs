@@ -48,6 +48,19 @@ pub(crate) fn endereco_valido(e: &str) -> bool {
         || separar_porta(e).is_some_and(|(nome, _)| nome_valido(nome))
 }
 
+/// R3 B7 (T002 da 009): a mensagem de um endereço digitado que não vale, com o motivo. O engano mais comum é o nome de
+/// computador do Windows com sublinhado (`CAIXA_2`), que não é um nome de rede válido.
+pub(crate) fn texto_de_endereco_invalido(e: &str) -> String {
+    let motivo = if e.contains('_') {
+        "nome com sublinhado não vale na rede; use hífen (caixa-2) ou o número"
+    } else if e.contains(char::is_whitespace) {
+        "sem espaços"
+    } else {
+        "use o número (192.168.0.12) ou o nome (caixa2.loja.local)"
+    };
+    format!("Endereço inválido: {e} ({motivo})")
+}
+
 /// "nome:porta" ou "nome" (o nome sem ":"; a porta de 1 a 65535).
 fn separar_porta(e: &str) -> Option<(&str, Option<u16>)> {
     match e.rsplit_once(':') {
@@ -80,11 +93,12 @@ static RESOLVIDOS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
 /// Os nomes resolvidos por último: (nome, IP ou o erro), para a tela.
 pub fn nomes_resolvidos() -> Vec<(String, String)> {
-    RESOLVIDOS.lock().map(|r| r.clone()).unwrap_or_default()
+    RESOLVIDOS.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 fn anotar_resolvido(nome: &str, resultado: String) {
-    if let Ok(mut r) = RESOLVIDOS.lock() {
+    {
+        let mut r = RESOLVIDOS.lock().unwrap_or_else(|e| e.into_inner());
         r.retain(|(n, _)| n != nome);
         r.push((nome.to_string(), resultado));
         let excesso = r.len().saturating_sub(64);
@@ -202,8 +216,9 @@ pub(super) fn digitados_completos(a: &Ajustes, parar: &AtomicBool) -> Vec<String
         }
         let (tx, dentro) = (tx.clone(), nome.clone());
         let lancou = std::thread::Builder::new().name("resolver-nome".into()).spawn(move || {
-            let ip = resolver_agora(&dentro, 0).map(|a| a.ip());
-            if let Some(ip) = ip.filter(|ip| !ip.is_unspecified()) {
+            // R3 B3: o 0.0.0.0 (um DNS que bloqueia nomes devolve isso) é uma falha, e não um endereço.
+            let ip = resolver_agora(&dentro, 0).map(|a| a.ip()).filter(|ip| !ip.is_unspecified());
+            if let Some(ip) = ip {
                 // Mesmo que a resposta chegue depois do prazo, ela vale para o próximo ciclo (R2 B3).
                 let mut v = ULTIMO_BOM.lock().unwrap_or_else(|e| e.into_inner());
                 v.retain(|(n, _)| *n != dentro);
@@ -266,6 +281,13 @@ pub(super) fn digitados_completos(a: &Ajustes, parar: &AtomicBool) -> Vec<String
         }
     }
     saida
+}
+
+/// Só nos testes (R3 M1): roda a resolução dos endereços digitados como o ciclo faz, sem o motor.
+#[cfg(test)]
+pub(crate) fn resolver_digitados_para_teste(conn: &rusqlite::Connection) -> Vec<String> {
+    let a = super::ajustes::ajustes(conn).expect("os ajustes da troca");
+    digitados_completos(&a, &AtomicBool::new(false))
 }
 
 /// O IP para a tela; o do próprio computador é avisado (R1 B2).
@@ -898,6 +920,8 @@ mod testes_nomes {
         salvar_ajustes(&b.conn, false, "", "caixa2.loja.local, 192.168.0.5:47810").unwrap();
         let e = salvar_ajustes(&b.conn, false, "", "caixa_2").unwrap_err();
         assert_eq!(e.nome_do_campo(), Some("enderecos"));
+        // R3 B7: a mensagem diz o motivo (o nome do Windows com sublinhado).
+        assert!(e.to_string().contains("sublinhado"), "{e}");
     }
 
     #[test]

@@ -105,10 +105,7 @@ pub fn salvar_ajustes(conn: &Connection, ligado: bool, senha: &str, enderecos: &
         let e = e.trim();
         // E6-1 (T002 da 009): IP, IP:porta, nome ou nome:porta.
         if !super::cliente::endereco_valido(e) {
-            return Err(Erro::campo(
-                "enderecos",
-                format!("Endereço inválido: {e} (ex.: 192.168.0.12 ou caixa2.loja.local)"),
-            ));
+            return Err(Erro::campo("enderecos", super::cliente::texto_de_endereco_invalido(e)));
         }
     }
     config::gravar(conn, "sync_ligado", if ligado { "1" } else { "0" })?;

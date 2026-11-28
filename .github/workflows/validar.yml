@@ -54,9 +54,6 @@ env:
   # carregada: vai no grupo serial, como os outros de rede.
   TESTES_DE_REDE: "rede_local:: sync:: testes_supervisao:: caminhos::"
   PULAR_REDE: "--skip rede_local:: --skip sync:: --skip testes_supervisao:: --skip caminhos::"
-  # R1 A1 da T003 (009): o laboratório da tun9 (unshare) é exigido; sem o namespace, o teste reprova em vez de passar
-  # calado.
-  RUSTINHO_EXIGIR_LAB_REDE: "1"
 
 jobs:
   # L0: formatação, clippy e a forma do portão.
@@ -162,6 +159,18 @@ jobs:
           else
             cargo test -p rustinho-base -p rustinho-nucleo -- $PULAR_REDE 2>&1 | tee -a "testes/nucleo-debug.txt"
           fi
+      # R3 M3 (T003 da 009): o laboratório das VPNs (rede_local::t003_lab_tun_de_verdade) precisa de um namespace de
+      # rede próprio (unshare -rn), do programa ip, da WireGuard e do /dev/net/tun. Libera o namespace (como o trabalho
+      # das telas faz) e confere os ingredientes antes, com uma mensagem clara se faltar algum.
+      - name: Laboratório de rede (namespace, ip, WireGuard, tun)
+        shell: bash
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+          if ! unshare -rn sh -c 'ip link add wg9 type wireguard && ip tuntap add dev tun9 mode tun' ; then
+            echo "::error::o laboratório das VPNs não tem o que precisa (unshare -rn, ip, WireGuard, /dev/net/tun)"
+            exit 1
+          fi
+          echo "laboratório de rede: ok"
       - name: Testes de rede do núcleo, em série (${{ matrix.perfil }})
         shell: bash
         run: |

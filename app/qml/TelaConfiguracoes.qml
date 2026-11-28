@@ -1795,7 +1795,7 @@ FocusScope {
                         visible: !!tela.sync && !!tela.sync.vpns && tela.sync.vpns.length > 0
                         text: !tela.sync || !tela.sync.vpns ? ""
                               : "VPN neste computador: " + tela.sync.vpns.map(v => v.nome + " (" + v.ip + ")").join(", ")
-                                + ". Os outros caixas podem usar este endereço."
+                                + (tela.sync.vpns.length > 1 ? ". Os outros caixas podem usar um destes endereços." : ". Os outros caixas podem usar este endereço.")
                         textFormat: Text.PlainText
                         Layout.fillWidth: true
                     }

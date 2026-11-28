@@ -165,7 +165,7 @@ def sem_dado(como, fotos, logs, conferir):
         t = esperar(rr, lambda x: any(base.simples(tx).startswith("codigo deste") for tx in sem_textos_especiais(x)), 20)
         time.sleep(0.8)
         base.xdo("type", "--delay", "40", CONVITE_SEM_LOJA)
-        if not rr.clicar("Aparece junto do convite. Ex.: 192.168.0.12"):
+        if not rr.clicar("Aparece junto do convite.", comeca=True):
             conferir(codigo, f"sem dado chegado, {nome} desiste sem perguntar", False,
                      "não medido: sem o campo do endereço do caixa da loja")
             return

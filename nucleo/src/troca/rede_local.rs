@@ -53,7 +53,7 @@ pub struct Interface {
     pub ativa: bool,
     /// R2 M2 (T003 da 009): o sistema diz `Up` (no Linux, macOS e Android, `IFF_RUNNING`). O `ativa` aceita também o
     /// estado desconhecido (um cabo sem a informação); para mostrar uma VPN na tela, só vale a ligada de verdade.
-    pub em_uso: bool,
+    pub com_sinal: bool,
     pub tipo: Tipo,
 }
 
@@ -65,7 +65,7 @@ impl Interface {
             ip: Ipv4Addr::from(ip),
             mascara: Ipv4Addr::from(u32::MAX.checked_shl(32 - prefixo as u32).unwrap_or(0)),
             ativa: true,
-            em_uso: true,
+            com_sinal: true,
             tipo,
         }
     }
@@ -90,7 +90,7 @@ pub fn vpn_camada3(nome: &str) -> bool {
 /// As VPNs de camada 3 desta lista, **ligadas** (R1 M1), com o IP de cada uma (para a tela). A lista vem do
 /// [`listar_para_vpns`], que guarda as interfaces ponto a ponto (o caso das VPNs).
 pub fn vpns(lista: &[Interface]) -> Vec<(String, Ipv4Addr)> {
-    lista.iter().filter(|i| i.em_uso && vpn_camada3(&i.nome)).map(|i| (i.nome.clone(), i.ip)).collect()
+    lista.iter().filter(|i| i.com_sinal && vpn_camada3(&i.nome)).map(|i| (i.nome.clone(), i.ip)).collect()
 }
 
 /// Classifica uma interface pelo nome que o sistema dá a ela (Linux, Android
@@ -166,14 +166,14 @@ fn listar_com(com_ponto_a_ponto: bool) -> std::io::Result<Vec<Interface>> {
             i.oper_status,
             if_addrs::IfOperStatus::Up | if_addrs::IfOperStatus::Unknown | if_addrs::IfOperStatus::Dormant
         ) && !v4.ip.is_unspecified();
-        let em_uso = ativa && matches!(i.oper_status, if_addrs::IfOperStatus::Up);
+        let com_sinal = ativa && matches!(i.oper_status, if_addrs::IfOperStatus::Up);
         lista.push(Interface {
             tipo: tipo_no_sistema(&i.name),
             nome: i.name,
             ip: v4.ip,
             mascara: v4.netmask,
             ativa,
-            em_uso,
+            com_sinal,
         });
     }
     Ok(lista)
@@ -1113,7 +1113,7 @@ mod testes {
         assert_eq!(vpns(&lista), vec![("wg0".to_string(), Ipv4Addr::new(10, 8, 0, 2))]);
         // R1 M1: a VPN desligada não aparece (a tela diria um endereço que não responde).
         let mut desligada = Interface::de_teste("wg1", [10, 8, 1, 2], 24, Tipo::Virtual);
-        desligada.em_uso = false;
+        desligada.com_sinal = false;
         assert!(vpns(&[desligada]).is_empty(), "VPN desligada não vai à tela");
     }
 
@@ -1144,6 +1144,8 @@ mod testes {
                 std::fs::create_dir_all(&pasta).unwrap();
                 let mut s = crate::Servico::abrir_para_teste(&pasta.join("rustinho.db"), false).unwrap();
                 let v: serde_json::Value = serde_json::from_str(&s.chamar("sync_ler", "{}")).unwrap();
+                drop(s);
+                let _ = std::fs::remove_dir_all(&pasta); // R3 B6: a pasta é deste teste
                 v["dados"]["vpns"]
                     .as_array()
                     .unwrap_or_else(|| panic!("a leitura da tela não tem a chave vpns: {v}"))

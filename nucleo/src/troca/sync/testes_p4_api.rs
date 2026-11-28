@@ -139,8 +139,23 @@ fn p4_api_convite_e_entrada_recusados_fora_das_regras() {
         let r = chamar(&mut sa, "p4_gerar_convite", json!({ "codigoPedido": "ABCD-EFGH-JKLM", "nome": "X" }));
         assert_eq!(r["erro"], p4::TEXTO_CONVITE_SEM_TROCA, "{r}");
 
-        // O caixa da loja (com usuários) não entra como caixa novo.
-        let r = chamar(&mut sa, "p4_juntar_com_convite", json!({ "convite": "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-F" }));
+        // O caixa da loja (com usuários) não entra como caixa novo; R3 B5: e ouve isso na hora, sem esperar os nomes.
+        let r = {
+            let _t = super::cliente::resolvedor_de_teste::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+            let _r = super::cliente::resolvedor_de_teste::Resolvedor::usar(|_| {
+                std::thread::sleep(Duration::from_secs(3));
+                None
+            });
+            let inicio = std::time::Instant::now();
+            let r = chamar(
+                &mut sa,
+                "p4_juntar_com_convite",
+                json!({ "convite": "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-F", "enderecos": "lento1.loja.local, lento2.loja.local" }),
+            );
+            assert!(inicio.elapsed() < Duration::from_millis(1500), "esperou os nomes: {:?}", inicio.elapsed());
+            std::thread::sleep(Duration::from_millis(3200)); // as consultas presas terminam antes de soltar o resolvedor
+            r
+        };
         assert_eq!(r["ok"], false, "{r}");
         // Endereço digitado errado: o campo certo.
         let cn = temp("api-regras-novo");
