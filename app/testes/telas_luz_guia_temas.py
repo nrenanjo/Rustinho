@@ -6,8 +6,9 @@ guia destaca o cartão do código repetido), uma vez em cada tema (o de sempre, 
 foto o **acréscimo de luz sobre o fundo** logo acima da borda do destaque: a 2 e a 8 px, contra uma linha do mesmo
 fundo mais acima (a 34 px ou mais, onde a luz já quase acabou; as duas linhas conferidas na foto sem o destaque). A borda vem da posição que o próprio programa informa (`GEO:luzGuia`).
 
-A referência é a luz do Canvas antigo (`99d479d`), medida uma vez com este mesmo roteiro (`--medir`) e guardada em
-`REFERENCIA`. Passa se cada medida ficar a até 25% da referência (ou a 1 nível, quando a referência é pequena).
+A referência é a luz do Canvas antigo (`99d479d`), guardada em `REFERENCIA`: saiu do reprocessamento, pelo método
+deste roteiro, das fotos de `saidas_bateria/luz_ref_canvas3` (o Canvas rodado com `--medir` e `RUSTINHO_LUZ_RET`; o
+Canvas não informa a posição da luz, e `RUSTINHO_LUZ_RET` dá a mesma posição medida nos anéis, só para isso). Passa se cada medida ficar a até 25% da referência (ou a 1 nível, quando a referência é pequena).
 
     python3 app/testes/telas_luz_guia_temas.py [pasta das fotos]
     python3 app/testes/telas_luz_guia_temas.py --medir [pasta]   (só imprime as medidas; não confere)
@@ -59,6 +60,8 @@ def acrescimos(foto, foto_sem, ret):
     if any(variacao(sem, yy, x0, x1) > 2 for yy in perto):
         return None
     cor = linha(sem, perto[0], x0, x1)
+    if any(abs(linha(sem, yy, x0, x1) - cor) > 2 for yy in perto):
+        return None
     longe = next((yy for yy in range(topo - FUNDO_A, topo - 140, -1)
                   if variacao(sem, yy, x0, x1) <= 2 and abs(linha(sem, yy, x0, x1) - cor) <= 2), None)
     if longe is None:
@@ -69,15 +72,17 @@ def acrescimos(foto, foto_sem, ret):
 
 
 def escolher(medidas):
-    """Das fotos durante o destaque, só as de véu cheio (o escurecimento do fundo a pelo menos 90% do maior: fora do
-    esmaecer de entrada e de saída); delas, a mediana de cada distância."""
-    medidas = [m for m in medidas if m is not None]
+    """Das fotos durante o destaque, só as de véu cheio; delas, a mediana de cada distância. B-1 da R20: o "cheio" é a
+    MEDIANA do véu das fotos com destaque (e não o maior: no começo do esmaecer o véu dobra por um instante, e uma foto
+    dessas ficaria sozinha); ficam as que estão entre 0,9 e 1,1 vez a mediana; com menos de 3, a medida não vale."""
+    medidas = [m for m in medidas if m is not None and m["veu"] > 0]
     if not medidas:
         return None
-    cheio = max(m["veu"] for m in medidas)
-    if cheio <= 0:
+    v = sorted(m["veu"] for m in medidas)
+    cheio = v[len(v) // 2]
+    boas = [m for m in medidas if 0.9 * cheio <= m["veu"] <= 1.1 * cheio]
+    if len(boas) < 3:
         return None
-    boas = [m for m in medidas if m["veu"] >= 0.9 * cheio]
     out = {}
     for d in DISTANCIAS:
         v = sorted(m[d] for m in boas)
@@ -165,7 +170,7 @@ def main():
             for d, esperado in zip(DISTANCIAS, ref):
                 folga = max(0.25 * abs(esperado), 1.0)
                 placar.ok(f"luz ({nome}) a {d} px igual à do Canvas antigo ({m[d]} contra {esperado}, folga {folga:.1f})",
-                          abs(m[d] - esperado) <= folga)
+                          abs(m[d] - esperado) <= folga, os.path.join(fotos, f"luz-{TEMAS[nome] or 'sempre'}-*.png"))
         erros = []
         for log in placar.logs:
             with open(log, errors="replace") as fh:
