@@ -708,6 +708,12 @@ fn entrar_com_convite(
     enderecos: &[String],
     quem: QuemEntra,
 ) -> Resultado<EntradaPeloConvite> {
+    // R2 B10 (T002 da 009): os nomes (até 2 s cada) são resolvidos ANTES de pegar a trava da troca; dentro dela fica
+    // só o banco e a entrada.
+    let qr_resolvido =
+        canal::interpretar_convite_entrada(convite).ok().and_then(|q| endereco_completo(q.endereco.trim()).ok());
+    let digitados: Vec<Resultado<SocketAddr>> =
+        enderecos.iter().filter(|e| !e.trim().is_empty()).map(|e| endereco_completo(e.trim())).collect();
     let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
     let mut conn = abrir_conexao(caminho)?;
     let usuarios = crate::usuarios::quantidade(&conn)?;
@@ -746,15 +752,15 @@ fn entrar_com_convite(
     let disp = config::ler(&conn, "dispositivo_id")?.unwrap_or_default();
     let pedido = aprovados::Pedido::com_dispositivo(&id.identidade, &disp);
     let mut alvos: Vec<SocketAddr> = Vec::new();
-    if let Ok(a) = endereco_completo(qr.endereco.trim()) {
+    if let Some(a) = qr_resolvido {
         alvos.push(a);
     }
     // E6-1 (T002 da 009): um endereço DIGITADO que não dá certo (um nome que não está na rede, ou que não respondeu a
     // tempo) é dito no próprio campo, em vez de ser pulado em silêncio. Mas só se nenhum outro caminho (o QR, os
     // anúncios) funcionar: um nome errado não impede a entrada pelo endereço certo (R1 M4).
     let mut erro_do_digitado: Option<Erro> = None;
-    for e in enderecos.iter().filter(|e| !e.trim().is_empty()) {
-        match endereco_completo(e.trim()) {
+    for resolvido in digitados {
+        match resolvido {
             Ok(a) if !alvos.contains(&a) => alvos.push(a),
             Ok(_) => {}
             Err(erro) => {
@@ -767,7 +773,9 @@ fn entrar_com_convite(
             alvos.push(a);
         }
     }
-    if alvos.is_empty() {
+    // R2 B1: só procura pelos anúncios (até 12 s) quando ninguém digitou um endereço; com um nome digitado que não
+    // resolve, o erro dele sai na hora.
+    if alvos.is_empty() && erro_do_digitado.is_none() {
         alvos = procurar_pelos_anuncios(&loja_esperada, PRAZO_DA_PROCURA);
     }
     if alvos.is_empty() {
@@ -824,7 +832,9 @@ fn entrar_com_convite(
         tx.commit()?;
         return Ok(EntradaPeloConvite { loja: entrada.loja_id, nome });
     }
-    Err(erro_do_digitado.or(ultimo).unwrap_or_else(|| Erro::validacao(TEXTO_SEM_ENDERECO)))
+    // R2 B2: houve tentativa de verdade? Vale o erro dela (o convite vencido, por exemplo). O do nome digitado só quando
+    // nenhum caminho foi tentado.
+    Err(ultimo.or(erro_do_digitado).unwrap_or_else(|| Erro::validacao(TEXTO_SEM_ENDERECO)))
 }
 
 /// T012: sem endereço nenhum, o caixa escuta os anúncios `RSA4` por até `prazo`

@@ -3675,7 +3675,6 @@ struct Impressao {
     id: String,
 }
 
-/// Endereço deste computador na rede local (para digitar nos outros caixas).
 /// E6-1 (T002 da 009), R1 B4 e M5: os nomes digitados e o que cada um deu no último ciclo, para a tela. Só os nomes que
 /// ainda estão digitados; com a troca parada, nada (nada é resolvido, e a tela não mostra resultado velho).
 fn nomes_para_a_tela(enderecos: &[String], resolvidos: Vec<(String, String)>, ativa: bool) -> Vec<Value> {
@@ -3714,6 +3713,7 @@ mod testes_nomes_para_a_tela {
     }
 }
 
+/// Endereço deste computador na rede local (para digitar nos outros caixas).
 fn endereco_local() -> String {
     // Não envia nada: só pergunta ao sistema por qual endereço sairia.
     std::net::UdpSocket::bind("0.0.0.0:0")

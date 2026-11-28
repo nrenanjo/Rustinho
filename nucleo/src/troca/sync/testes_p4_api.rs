@@ -76,13 +76,13 @@ fn p4_api_caixa_novo_entra_pelo_convite_digitado() {
 
         // R1 M4 (T002 da 009): um nome digitado errado ao lado do endereço certo não impede a entrada.
         let _t = super::cliente::resolvedor_de_teste::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        *super::cliente::resolvedor_de_teste::QUAL.lock().unwrap() = Some(|_| None);
+        let _r = super::cliente::resolvedor_de_teste::Resolvedor::usar(|_| None);
         let r = ok(
             &mut sb,
             "p4_juntar_com_convite",
             json!({ "convite": texto, "enderecos": format!("nome-errado.loja.local, 127.0.0.1:{pt_a}") }),
         );
-        *super::cliente::resolvedor_de_teste::QUAL.lock().unwrap() = None;
+        drop(_r);
         assert_eq!(r["p4"]["aprovado"], true, "o caixa novo ficou aprovado: {r}");
         assert_eq!(r["p4"]["temRaiz"], true);
         assert_eq!(r["ligado"], true, "a troca ligou sem a senha da rede");
@@ -91,6 +91,23 @@ fn p4_api_caixa_novo_entra_pelo_convite_digitado() {
         assert_eq!(estado["juntando"], true, "a tela de entrada espera os dados da loja");
         assert_eq!(estado["caixa"], "Caixa Novo", "o nome que o gerente deu no convite");
         assert_eq!(ok(&mut sa, "p4_convites", json!({})).as_array().unwrap().len(), 0, "o convite foi usado");
+        // R2 B2: com o convite já usado, um nome errado ao lado do endereço certo: o erro mostrado é o da tentativa de
+        // verdade (o convite), e não o do nome.
+        {
+            let cc = temp("api-conv-c");
+            let mut sc = caixa_novo(&cc);
+            let _r = super::cliente::resolvedor_de_teste::Resolvedor::usar(|_| None);
+            let r = chamar(
+                &mut sc,
+                "p4_juntar_com_convite",
+                json!({ "convite": texto, "enderecos": format!("nome-errado.loja.local, 127.0.0.1:{pt_a}") }),
+            );
+            assert_eq!(r["ok"], false, "{r}");
+            assert!(
+                !r["erro"].as_str().unwrap_or("").contains("não foi encontrado"),
+                "o erro real, e não o do nome: {r}"
+            );
+        }
 
         // A auditoria do caixa 1 mostra quem gerou (o identificador do gerente).
         let aud = ok(&mut sa, "auditoria_listar", json!({}));
@@ -130,18 +147,21 @@ fn p4_api_convite_e_entrada_recusados_fora_das_regras() {
         let mut sn = caixa_novo(&cn);
         // R1 B10: sem depender do DNS de verdade (um DNS que responde a tudo faria o nome "existir").
         let _t = super::cliente::resolvedor_de_teste::UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
-        *super::cliente::resolvedor_de_teste::QUAL.lock().unwrap() = Some(|_| None);
+        let _r = super::cliente::resolvedor_de_teste::Resolvedor::usar(|_| None);
+        let inicio = std::time::Instant::now();
         let r = chamar(
             &mut sn,
             "p4_juntar_com_convite",
             json!({ "convite": "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-F", "enderecos": "caixa-da-frente" }),
         );
         assert_eq!(r["campo"], "enderecos", "{r}");
+        // R2 B1: só o nome errado: o erro sai na hora, sem os 12 s da procura pelos anúncios.
+        assert!(inicio.elapsed() < Duration::from_secs(6), "sem a procura de 12 s: {:?}", inicio.elapsed());
         // E6-1 (T002 da 009): um nome que não está na rede também vai ao campo, com o motivo.
         assert!(r["erro"].as_str().unwrap_or("").contains("caixa-da-frente"), "{r}");
         // R1 M5: o texto novo (o de antes dizia só "Endereço inválido").
         assert!(r["erro"].as_str().unwrap_or("").contains("não foi encontrado na rede"), "{r}");
-        *super::cliente::resolvedor_de_teste::QUAL.lock().unwrap() = None;
+        drop(_r);
         // E o endereço com a forma errada (o sublinhado não vale em nome), também.
         let r = chamar(
             &mut sn,
