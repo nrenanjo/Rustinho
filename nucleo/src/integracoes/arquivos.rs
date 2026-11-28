@@ -269,9 +269,7 @@ fn utf16(bytes: &[u8]) -> Option<String> {
         _ => return None,
     };
     let unidades =
-        corpo
-            .chunks_exact(2)
-            .map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) });
+        corpo.as_chunks::<2>().0.iter().map(|&c| if le { u16::from_le_bytes(c) } else { u16::from_be_bytes(c) });
     Some(char::decode_utf16(unidades).map(|r| r.unwrap_or('\u{FFFD}')).collect())
 }
 
@@ -380,11 +378,18 @@ fn extrair_a_nota(texto: &str) -> Option<String> {
         return None;
     }
     // B-6 da R4 e B-2 da R5: os espaços de nomes que a nota usa, pela árvore (os nomes dos elementos e dos atributos),
-    // e não pelo texto (um "a:" num texto livre não conta).
-    let usados: std::collections::HashSet<&str> = nota
+    // e não pelo texto (um "a:" num texto livre não conta). B-1 da R6: pelo par (prefixo como está escrito, endereço),
+    // e não só pelo endereço: um `xmlns:ns2` do embrulho com o mesmo endereço do `xmlns` da nota não é usado por ela.
+    let usados: std::collections::HashSet<(Option<&str>, &str)> = nota
         .descendants()
         .filter(|n| n.is_element())
-        .flat_map(|n| n.tag_name().namespace().into_iter().chain(n.attributes().filter_map(|a| a.namespace())))
+        .flat_map(|n| {
+            let elemento = n.tag_name().namespace().map(|uri| (prefixo_escrito(texto, n.range().start + 1), uri));
+            let atributos = n
+                .attributes()
+                .filter_map(|a| a.namespace().map(|uri| (prefixo_escrito(texto, a.range_qname().start), uri)));
+            elemento.into_iter().chain(atributos)
+        })
         .collect();
     let mut acrescimo = String::new();
     for ns in nota.namespaces().filter(|ns| ns.name() != Some("xml")) {
@@ -394,13 +399,20 @@ fn extrair_a_nota(texto: &str) -> Option<String> {
         };
         // Só os que a nota usa: um prefixo só do embrulho entraria na canonicalização e derrubaria a assinatura de uma
         // nota boa.
-        let usado = usados.contains(ns.uri());
+        let usado = usados.contains(&(ns.name(), ns.uri()));
         if usado && !abertura.contains(&atributo) {
             acrescimo.push_str(&format!(" {atributo}\"{}\"", escapar_atributo(ns.uri())));
         }
     }
     let extraido = format!("{}{}{}", &trecho[..fim_nome], acrescimo, &trecho[fim_nome..]);
     abre(&extraido).then_some(extraido)
+}
+
+/// O prefixo de um nome como está escrito no texto, a partir do começo do nome (`q` em `q:NFe`; nenhum em `NFe`).
+fn prefixo_escrito(texto: &str, inicio: usize) -> Option<&str> {
+    let resto = &texto[inicio..];
+    let nome = &resto[..resto.find(|c: char| c.is_whitespace() || matches!(c, '>' | '/' | '=')).unwrap_or(resto.len())];
+    nome.split_once(':').map(|(p, _)| p)
 }
 
 /// O valor de um atributo escrito de volta no XML (B-6 da revisão): `&`, `<`, `"` e os espaços especiais com escape.
@@ -958,6 +970,38 @@ mod testes {
         // B-2 da R5: um "b:" no texto livre não faz levar o prefixo b.
         let texto_livre = "<pagina xmlns:b=\"y\"><NFe><infNFe Id=\"a\"><x>Entrega b: rua</x></infNFe></NFe></pagina>";
         assert_eq!(texto_do_xml(texto_livre.as_bytes()), "<NFe><infNFe Id=\"a\"><x>Entrega b: rua</x></infNFe></NFe>");
+        // B-3 da R6: o atributo com prefixo depois de um tab (e não de um espaço) também faz levar o prefixo.
+        let com_tab = "<pagina xmlns=\"n\" xmlns:a=\"x\"><NFe\ta:k=\"1\"><infNFe Id=\"a\"/></NFe></pagina>";
+        assert_eq!(
+            texto_do_xml(com_tab.as_bytes()),
+            "<NFe xmlns=\"n\" xmlns:a=\"x\"\ta:k=\"1\"><infNFe Id=\"a\"/></NFe>"
+        );
+    }
+
+    /// B-1 da R6: um prefixo do embrulho que a nota não usa não entra nela, nem quando tem o mesmo endereço de um espaço
+    /// de nomes que ela usa (o `xmlns:ns2` de um lote `enviNFe`, o `xmlns:ds` de uma página com a nota assinada): ele
+    /// entraria na canonicalização e a nota boa pareceria "alterada depois da assinatura". Vale o par (prefixo escrito,
+    /// endereço), e não só o endereço.
+    #[test]
+    fn xdcl_extracao_leva_o_par_prefixo_e_endereco() {
+        let t = texto_do_xml(b"<p xmlns=\"n\" xmlns:q=\"n\"><NFe><infNFe Id=\"a\"/></NFe></p>");
+        assert_eq!(t, "<NFe xmlns=\"n\"><infNFe Id=\"a\"/></NFe>");
+        let nfe = "http://www.portalfiscal.inf.br/nfe";
+        let lote = format!(
+            "<ns2:enviNFe xmlns:ns2=\"{nfe}\"><ns2:idLote>1</ns2:idLote><NFe xmlns=\"{nfe}\"><infNFe Id=\"a\"/></NFe>\
+             </ns2:enviNFe>"
+        );
+        assert_eq!(texto_do_xml(lote.as_bytes()), format!("<NFe xmlns=\"{nfe}\"><infNFe Id=\"a\"/></NFe>"));
+        let ds = "http://www.w3.org/2000/09/xmldsig#";
+        let pagina =
+            format!("<p xmlns:ds=\"{ds}\"><NFe xmlns=\"n\"><infNFe Id=\"a\"/><Signature xmlns=\"{ds}\"/></NFe></p>");
+        assert_eq!(
+            texto_do_xml(pagina.as_bytes()),
+            format!("<NFe xmlns=\"n\"><infNFe Id=\"a\"/><Signature xmlns=\"{ds}\"/></NFe>")
+        );
+        // O prefixo que a nota usa no nome dela continua sendo levado.
+        let t = texto_do_xml(b"<p xmlns:q=\"n\" xmlns:r=\"n\"><q:NFe><q:infNFe Id=\"a\"/></q:NFe></p>");
+        assert_eq!(t, "<q:NFe xmlns:q=\"n\"><q:infNFe Id=\"a\"/></q:NFe>");
     }
 
     /// B-4 e B-6 da R4: na extração de uma nota de um embrulho, o endereço do espaço de nomes é escrito com escape
