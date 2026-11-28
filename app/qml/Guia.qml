@@ -402,6 +402,9 @@ Item {
                                             : Tema.escuro ? Qt.rgba(232 / 255, 194 / 255, 126 / 255, 0.06)
                                             : Qt.rgba(1, 249 / 255, 237 / 255, 0.16)
             readonly property real passo: 3
+            // A força dos anéis, medida contra a luz do Canvas antigo nas fotos (B-1 da telas_c8_revisao): com 1,0 a
+            // borda ficava ~3 vezes mais clara que antes; com 0,36, igual (+7 a 8 de claridade na borda, ~1 a 30 px).
+            readonly property real forcaLuz: 0.36
             readonly property int aneis: Math.ceil(guia.alcanceLuz / passo)
 
             // A força da sombra a uma distância d da borda (d < 0 é dentro): metade de erfc(d / (σ√2)), σ = 21.
@@ -426,7 +429,7 @@ Item {
                     radius: luz.raio + fora
                     color: "transparent"
                     border.width: luz.passo
-                    border.color: luz.comAlfa(luz.corSombra, luz.forca(fora - luz.passo / 2))
+                    border.color: luz.comAlfa(luz.corSombra, luz.forcaLuz * luz.forca(fora - luz.passo / 2))
                     antialiasing: false
                 }
             }
@@ -435,7 +438,7 @@ Item {
                 radius: luz.raio
                 color: "transparent"
                 border.width: Math.min(guia.folga, Math.min(luz.width, luz.height) / 2)
-                border.color: luz.comAlfa(luz.corSombra, luz.forca(-guia.folga / 2))
+                border.color: luz.comAlfa(luz.corSombra, luz.forcaLuz * luz.forca(-guia.folga / 2))
                 antialiasing: false
                 Rectangle {
                     anchors.fill: parent
