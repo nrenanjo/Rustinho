@@ -323,6 +323,14 @@ fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
         TEXTO_SEM_NOTA.to_string()
     })?;
     let raiz = doc.root_element();
+    // M-1 da R4 do BUG-20261128-XDCL: o CT-e e o MDF-e citam as notas transportadas em `infNFe` (só com a chave); eles
+    // são reconhecidos antes, para não serem lidos como se fossem uma nota.
+    if descendente(raiz, "infCte").is_some() {
+        return Err("Este XML é de um CT-e (frete), não de uma NF-e. Digite o valor do frete na compra.".into());
+    }
+    if descendente(raiz, "infMDFe").is_some() {
+        return Err("Este XML é de um MDF-e (manifesto de carga): não é de uma NF-e.".into());
+    }
     let inf = descendente(raiz, "infNFe").ok_or_else(|| {
         let nome = raiz.tag_name().name();
         if nome.contains("resNFe") || nome.contains("procEvento") || nome.contains("evento") {
@@ -736,7 +744,10 @@ mod testes {
         let fim_tag = i + certo[i..].find('>').unwrap();
         assert!(certo[i..fim_tag].contains(ns), "a nota de teste declara o espaço de nomes no nfeProc");
         let sem_ns = format!("{}{}", &certo[i..fim_tag].replacen(ns, "", 1), &certo[fim_tag..]);
-        let embrulho = format!("<pagina{ns}><titulo>Nota baixada</titulo>{sem_ns}</pagina>");
+        // B-6 da R4: o embrulho também declara um prefixo que a nota não usa; ele não pode entrar na nota.
+        let embrulho = format!(
+            "<pagina{ns} xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\"><titulo>Nota baixada</titulo>{sem_ns}</pagina>"
+        );
         let texto = crate::integracoes::arquivos::texto_do_xml(embrulho.as_bytes());
         assert!(texto.starts_with("<nfeProc"), "{}", &texto[..60]);
         let v = ler_cadastro_verificada(&texto, crate::nfe_assinatura::Ancoras::de_teste()).expect("a nota abre");
@@ -757,6 +768,29 @@ mod testes {
         assert!(anotacao(ANOTACOES_MAXIMAS - 1, "x").is_some());
         assert!(anotacao(ANOTACOES_MAXIMAS, "x").unwrap().contains("não são anotadas"));
         assert_eq!(anotacao(ANOTACOES_MAXIMAS + 1, "x"), None);
+    }
+
+    /// M-1 da R4: um CT-e (frete) que cita várias notas transportadas (`infNFe` sem atributos, com a chave) continua
+    /// sendo um CT-e, e não "mais de uma nota"; o mesmo para um MDF-e. B-3: uma nota única com `infNFeSupl`, o QR Code em
+    /// CDATA e comentários que citam `<infNFe Id=…>` nunca conta como várias.
+    #[test]
+    fn xdcl_cte_com_varias_chaves_e_nota_unica_com_comentarios() {
+        let cte = "<cteProc><CTe><infCte Id=\"CTe1\"><infCTeNorm><infDoc><infNFe><chave>1</chave></infNFe>\
+                   <infNFe><chave>2</chave></infNFe></infDoc></infCTeNorm></infCte></CTe></cteProc>";
+        for texto in [cte.to_string(), crate::integracoes::arquivos::texto_do_xml(format!("lixo {cte}").as_bytes())] {
+            let e = ler(&texto).unwrap_err();
+            assert!(e.contains("CT-e"), "{e}");
+            let a = crate::nfe_assinatura::Ancoras::de_teste();
+            assert_ne!(ler_cadastro_verificada(&texto, a).err().unwrap(), TEXTO_VARIAS_NOTAS);
+        }
+        let mdfe = "<mdfeProc><MDFe><infMDFe Id=\"MDFe1\"><infDoc><infMunDescarga><infNFe><chNFe>1</chNFe></infNFe>\
+                    <infNFe><chNFe>2</chNFe></infNFe></infMunDescarga></infDoc></infMDFe></MDFe></mdfeProc>";
+        assert_ne!(ler(mdfe).unwrap_err(), TEXTO_VARIAS_NOTAS);
+        let unica =
+            "<nfeProc><NFe><!-- <infNFe Id=\"x\"> --><!--> <infNFe Id=\"z\"> --><infNFe Id=\"NFe1\" versao=\"4.00\"/>\
+                     <infNFeSupl><qrCode><![CDATA[<infNFe Id=\"y\">]]></qrCode></infNFeSupl></NFe></nfeProc>";
+        assert_eq!(crate::integracoes::arquivos::notas_no_texto(unica), 1);
+        assert_ne!(ler(unica).err().unwrap_or_default(), TEXTO_VARIAS_NOTAS);
     }
 
     #[test]

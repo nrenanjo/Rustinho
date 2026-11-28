@@ -373,14 +373,25 @@ fn extrair_a_nota(texto: &str) -> Option<String> {
     let trecho = &texto[nota.range()];
     // O nome do elemento como está escrito (com o prefixo) e o fim dele no trecho.
     let fim_nome = trecho[1..].find(|c: char| c.is_whitespace() || matches!(c, '>' | '/'))? + 1;
+    // B-1 da R4: a abertura é medida uma vez, e uma abertura gigante ou com espaços de nomes demais (só num arquivo
+    // hostil: uma nota tem 2 ou 3) não é extraída.
+    let abertura = &trecho[..trecho.find('>')?];
+    if abertura.len() > 64 * 1024 || nota.namespaces().len() > 32 {
+        return None;
+    }
     let mut acrescimo = String::new();
     for ns in nota.namespaces().filter(|ns| ns.name() != Some("xml")) {
         let atributo = match ns.name() {
             Some(prefixo) => format!("xmlns:{prefixo}="),
             None => "xmlns=".to_string(),
         };
-        let abertura = &trecho[..trecho.find('>')?];
-        if !abertura.contains(&atributo) {
+        // B-6 da R4: só os espaços de nomes que a nota usa (o padrão, ou um prefixo que aparece nela); um prefixo só
+        // do embrulho entraria na canonicalização e derrubaria a assinatura de uma nota boa.
+        let usado = match ns.name() {
+            None => true,
+            Some(prefixo) => trecho.contains(&format!("<{prefixo}:")) || trecho.contains(&format!(" {prefixo}:")),
+        };
+        if usado && !abertura.contains(&atributo) {
             acrescimo.push_str(&format!(" {atributo}\"{}\"", escapar_atributo(ns.uri())));
         }
     }
@@ -427,21 +438,25 @@ fn achar(t: &str) -> Achados<'_> {
     while let Some(d) = t[i..].find('<') {
         let p = i + d;
         let resto = &t[p + 1..];
-        let pular = |fim: &str| resto.find(fim).map(|f| p + 1 + f + fim.len()).unwrap_or(t.len());
+        // B-3 da R4: o fim é procurado depois do abridor (`<!-->` não fecha o comentário).
+        let pular =
+            |abre: usize, fim: &str| resto[abre..].find(fim).map(|f| p + 1 + abre + f + fim.len()).unwrap_or(t.len());
         i = if resto.starts_with("!--") {
-            pular("-->")
+            pular(3, "-->")
         } else if resto.starts_with("![CDATA[") {
-            pular("]]>")
+            pular(8, "]]>")
         } else if resto.starts_with('?') {
-            pular("?>")
+            pular(1, "?>")
         } else if resto.starts_with('!') {
-            pular(">")
+            pular(1, ">")
         } else if resto.starts_with(|c: char| c.is_alphabetic() || c == '_') {
             let n = resto.find(|c: char| c.is_whitespace() || matches!(c, '>' | '/' | '<')).unwrap_or(resto.len());
             let nome = &resto[..n];
             let local = nome.rsplit(':').next().unwrap_or(nome);
             a.primeiro.get_or_insert((p, nome));
-            if local == "infNFe" {
+            // M-1 da R4: só conta como nota o `infNFe` com atributos (o da NF-e sempre tem `Id` e `versao`); o do
+            // CT-e e do MDF-e, que só cita a chave das notas transportadas, não tem.
+            if local == "infNFe" && resto[n..].starts_with(char::is_whitespace) {
                 a.notas = (a.notas + 1).min(2);
             }
             if RAIZES_FISCAIS.contains(&local) && a.fiscais.len() < TENTATIVAS {
@@ -900,14 +915,40 @@ mod testes {
         ];
         for (i, caso) in casos.into_iter().enumerate() {
             let (tx, rx) = std::sync::mpsc::channel();
+            let entrada = caso.clone();
             std::thread::spawn(move || {
-                let _ = tx.send(texto_do_xml(&caso).len());
+                let _ = tx.send(texto_do_xml(&caso));
             });
-            assert!(
-                rx.recv_timeout(std::time::Duration::from_secs(30)).is_ok(),
-                "o caso hostil {i} não terminou em 30 s"
-            );
+            let saida = rx
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .unwrap_or_else(|_| panic!("o caso hostil {i} não terminou em 30 s"));
+            // B-5 da R4: sem nota nenhuma, o texto volta como veio (os três primeiros são UTF-8 válido).
+            if i < 3 {
+                assert_eq!(saida.as_bytes(), entrada.as_slice(), "caso hostil {i}");
+            }
         }
+    }
+
+    /// B-5 da R4: a leitura protegida aceita a profundidade de uma nota (até 64) e recusa a de um arquivo hostil (65 ou
+    /// mais), sem derrubar o programa.
+    #[test]
+    fn xdcl_profundidade_no_limite() {
+        let aninhado = |n: usize| format!("{}{}", "<a>".repeat(n), "</a>".repeat(n));
+        assert!(abre(&aninhado(64)));
+        assert!(!abre(&aninhado(65)));
+        assert!(!abre(&aninhado(200_000)));
+    }
+
+    /// B-4 e B-6 da R4: na extração de uma nota de um embrulho, o endereço do espaço de nomes é escrito com escape
+    /// (`&amp;` continua `&amp;`), e um prefixo que só o embrulho declara não entra na nota.
+    #[test]
+    fn xdcl_extracao_escapa_e_so_leva_o_que_a_nota_usa() {
+        let t = texto_do_xml(b"<pagina xmlns=\"http://a/?x=1&amp;y=2\"><NFe><infNFe Id=\"a\"/></NFe></pagina>");
+        assert_eq!(t, "<NFe xmlns=\"http://a/?x=1&amp;y=2\"><infNFe Id=\"a\"/></NFe>");
+        let t = texto_do_xml(
+            b"<s:Envelope xmlns:s=\"http://soap\" xmlns=\"http://nfe\"><s:Body><NFe><infNFe Id=\"a\"/></NFe></s:Body></s:Envelope>",
+        );
+        assert_eq!(t, "<NFe xmlns=\"http://nfe\"><infNFe Id=\"a\"/></NFe>");
     }
 
     /// B-7 da revisão: um arquivo só com espaços ou bytes nulos não vira um texto vazio (que quer dizer "não deu para
